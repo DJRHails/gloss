@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.data/
+.env
+.env.*
+.claude/settings.local.json
+.agents/settings.local.json
