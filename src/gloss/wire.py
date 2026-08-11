@@ -15,6 +15,10 @@ from gloss.freecell import GameState
 
 FeedbackMode = Literal["ack", "board"]
 Condition = Literal["with-cot", "no-cot", "swapped-cot"]
+# Which channel the `cot` column is sourced from. "native" is the API thinking blocks;
+# "scratchpad" is a tool argument the player was told to treat as its reasoning channel
+# (the neuralese-leaker / deep_think mechanism), with native thinking left on underneath.
+CotSource = Literal["native", "scratchpad"]
 
 
 class ToolCallRecord(BaseModel):
@@ -35,6 +39,7 @@ class TurnRecord(BaseModel):
     turn_index: int
     state_before: GameState
     thinking: str
+    native_thinking: str = ""
     assistant_text: str
     tool_call: ToolCallRecord | None
     tool_result: str | None
@@ -51,6 +56,7 @@ class Transcript(BaseModel):
     agent_model: str
     feedback_mode: FeedbackMode
     thinking_budget: int
+    cot_source: CotSource = "native"
     turns: list[TurnRecord]
     won: bool
 

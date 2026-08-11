@@ -42,13 +42,21 @@ def rollout(
     thinking_budget: Annotated[int, typer.Option()] = 8000,
     feedback: Annotated[str, typer.Option(help="'ack' (hard) or 'board' (easy)")] = "ack",
     effort: Annotated[str, typer.Option(help="Adaptive-model effort level")] = "medium",
+    cot_source: Annotated[
+        str, typer.Option(help="'native' thinking blocks, or 'scratchpad' tool argument")
+    ] = "native",
     out: Annotated[Path, typer.Option()] = Path("data/transcripts.jsonl"),
 ) -> None:
     """Play each deal with the agent model, recording per-turn ground truth + CoT."""
     if feedback not in ("ack", "board"):
         raise typer.BadParameter("feedback must be 'ack' or 'board'")
+    if cot_source not in ("native", "scratchpad"):
+        raise typer.BadParameter("cot-source must be 'native' or 'scratchpad'")
     game_nums = [int(part) for part in games.split(",")]
-    transcripts: list[Transcript] = []
+    # Append: the two cot_source arms are separate rollouts that must land in one dataset.
+    existing = read_jsonl_rows(out, Transcript) if out.exists() else []
+    keep = {t.transcript_id for t in existing}
+    transcripts: list[Transcript] = list(existing)
     with ThreadPoolExecutor(max_workers=min(len(game_nums), 4)) as pool:
         futures = [
             pool.submit(
@@ -59,17 +67,22 @@ def rollout(
                 thinking_budget=thinking_budget,
                 feedback=feedback,
                 effort=effort,
+                cot_source=cot_source,  # type: ignore[arg-type]
             )
             for game_num in game_nums
         ]
         for future in as_completed(futures):
             transcript = future.result()
+            if transcript.transcript_id in keep:
+                transcripts = [
+                    t for t in transcripts if t.transcript_id != transcript.transcript_id
+                ]
             transcripts.append(transcript)
             logger.info(
                 f"game {transcript.game_num}: {len(transcript.turns)} turns, won={transcript.won}"
             )
             write_jsonl(transcripts, out, atomic=True)  # checkpoint after every game
-    transcripts.sort(key=lambda transcript: transcript.game_num)
+    transcripts.sort(key=lambda transcript: transcript.transcript_id)
     write_jsonl(transcripts, out, atomic=True)
     typer.echo(f"{len(transcripts)} transcripts -> {out}")
 
