@@ -15,7 +15,7 @@ import typer
 from loguru import logger
 
 from gloss.freecell import deal as ms_deal
-from gloss.monitor import build_items, run_monitor
+from gloss.monitor import build_items, run_monitor, swapped_cot_donors
 from gloss.rollout import run_rollout
 from gloss.scoring import score_run, summarize, summary_table
 from gloss.utils.jsonl import read_jsonl_rows, write_jsonl
@@ -25,7 +25,7 @@ app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
 DEFAULT_AGENT = "claude-fable-5"
 DEFAULT_MONITORS = "claude-sonnet-5,claude-haiku-4-5-20251001"
-CONDITIONS: tuple[Condition, Condition] = ("with-cot", "no-cot")
+CONDITIONS: tuple[Condition, ...] = ("with-cot", "no-cot", "swapped-cot")
 
 
 @app.command()
@@ -102,6 +102,7 @@ def monitor(
     recorded as a monitor failure — infra faults must not score as zeros.
     """
     monitor_items = read_jsonl_rows(items_path, MonitorItem)
+    donors = swapped_cot_donors(monitor_items)
     runs: list[MonitorRun] = read_jsonl_rows(out, MonitorRun) if out.exists() else []
     done = {(run.item_id, run.monitor_model, run.condition) for run in runs}
     calls = [
@@ -110,6 +111,8 @@ def monitor(
         for condition in CONDITIONS
         for item in monitor_items
         if (item.item_id, model.strip(), condition) not in done
+        # swapped-cot is undefined when no cross-transcript donor exists
+        and not (condition == "swapped-cot" and item.item_id not in donors)
     ]
     if done:
         logger.info(f"resuming: {len(done)} runs already checkpointed, {len(calls)} to go")
@@ -123,6 +126,7 @@ def monitor(
                 condition=condition,
                 thinking_budget=thinking_budget,
                 effort=effort,
+                donor_cot=donors.get(item.item_id),
             ): (item.item_id, model, condition)
             for item, model, condition in calls
         }

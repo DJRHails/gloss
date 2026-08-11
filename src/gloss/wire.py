@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from gloss.freecell import GameState
 
 FeedbackMode = Literal["ack", "board"]
-Condition = Literal["with-cot", "no-cot"]
+Condition = Literal["with-cot", "no-cot", "swapped-cot"]
 
 
 class ToolCallRecord(BaseModel):

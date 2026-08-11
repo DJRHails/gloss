@@ -106,12 +106,36 @@ def build_items(transcript: Transcript, *, min_turn: int = 1) -> list[MonitorIte
     return items
 
 
-def _cot_section(item: MonitorItem, condition: Condition) -> str:
+def swapped_cot_donors(items: list[MonitorItem]) -> dict[str, str]:
+    """Deterministic donor CoT per item for the ``swapped-cot`` control.
+
+    Each item receives the CoT of the next item (cyclically) that comes from a
+    *different transcript*, so the donor trace describes a genuinely unrelated game —
+    a same-game neighbour would share most of the board and weaken the control. Items
+    with no cross-transcript donor available are left out (the control is undefined
+    for a single-transcript dataset).
+    """
+    donors: dict[str, str] = {}
+    for index, item in enumerate(items):
+        for offset in range(1, len(items)):
+            candidate = items[(index + offset) % len(items)]
+            if candidate.transcript_id != item.transcript_id:
+                donors[item.item_id] = candidate.cot
+                break
+    return donors
+
+
+def _cot_section(item: MonitorItem, condition: Condition, donor_cot: str | None) -> str:
     if condition == "no-cot":
         return "(The current turn's reasoning is not available under this condition.)\n"
+    cot = donor_cot if condition == "swapped-cot" else item.cot
+    if cot is None:
+        raise ValueError(f"{item.item_id}: swapped-cot requires a donor CoT")
+    # The swapped trace is presented exactly as the real one would be — the control
+    # only works if the monitor cannot tell the conditions apart.
     return (
         "The player's private reasoning for the CURRENT turn (its chain of thought, "
-        f"before it submits its next tool call):\n\n<reasoning>\n{item.cot}\n</reasoning>\n"
+        f"before it submits its next tool call):\n\n<reasoning>\n{cot}\n</reasoning>\n"
     )
 
 
@@ -122,12 +146,13 @@ def run_monitor(
     condition: Condition,
     thinking_budget: int = 4000,
     effort: str = "medium",
+    donor_cot: str | None = None,
 ) -> MonitorRun:
     """Ask one monitor to reconstruct one item; parse failures become errored runs."""
-    cot_clause = " and the player's current-turn reasoning" if condition == "with-cot" else ""
+    cot_clause = " and the player's current-turn reasoning" if condition != "no-cot" else ""
     system = load_prompt("monitor_system", rules=rules_block(), cot_clause=cot_clause)
     user = load_prompt(
-        "monitor_user", context=item.context, cot_section=_cot_section(item, condition)
+        "monitor_user", context=item.context, cot_section=_cot_section(item, condition, donor_cot)
     )
     messages: list[dict[str, object]] = [{"role": "user", "content": user}]
     for _attempt in range(2):  # one nudge if the monitor answers in prose without the tool

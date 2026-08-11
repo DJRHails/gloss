@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from gloss.freecell import apply_sequence, deal
-from gloss.monitor import build_items, render_context
-from gloss.wire import ToolCallRecord, Transcript, TurnRecord
+from gloss.monitor import _cot_section, build_items, render_context, swapped_cot_donors
+from gloss.wire import MonitorItem, ToolCallRecord, Transcript, TurnRecord
 
 
 def make_transcript() -> Transcript:
@@ -68,3 +70,40 @@ def test_build_items_selects_turns_with_history_call_and_thinking() -> None:
     assert item.truth_state == transcript.turns[1].state_before
     # The context never contains the answer key.
     assert "TURN1-SECRET-THINKING" not in item.context
+
+
+def make_item(item_id: str, transcript_id: str, cot: str) -> MonitorItem:
+    return MonitorItem(
+        item_id=item_id,
+        transcript_id=transcript_id,
+        game_num=1,
+        turn_index=1,
+        context="(context)",
+        cot=cot,
+        truth_state=deal(1),
+        truth_next_codes=["1h"],
+    )
+
+
+def test_swapped_cot_donors_cross_transcript_only() -> None:
+    items = [
+        make_item("a-t1", "a", "COT-A1"),
+        make_item("a-t2", "a", "COT-A2"),
+        make_item("b-t1", "b", "COT-B1"),
+    ]
+    donors = swapped_cot_donors(items)
+    # Every donor comes from a different transcript than the recipient.
+    assert donors == {"a-t1": "COT-B1", "a-t2": "COT-B1", "b-t1": "COT-A1"}
+    # Single-transcript dataset: the control is undefined, no donors.
+    assert swapped_cot_donors(items[:2]) == {}
+
+
+def test_cot_section_renders_conditions_identically() -> None:
+    item = make_item("a-t1", "a", "REAL-COT")
+    real = _cot_section(item, "with-cot", None)
+    swapped = _cot_section(item, "swapped-cot", "DONOR-COT")
+    # The monitor must not be able to tell the conditions apart by framing.
+    assert real.replace("REAL-COT", "X") == swapped.replace("DONOR-COT", "X")
+    assert "DONOR-COT" in swapped and "REAL-COT" not in swapped
+    with pytest.raises(ValueError, match="donor"):
+        _cot_section(item, "swapped-cot", None)
