@@ -13,7 +13,13 @@ from __future__ import annotations
 from loguru import logger
 
 from gloss.freecell import GameState, apply_sequence, deal
-from gloss.models.anthropic import create_message, extract_blocks, thinking_param
+from gloss.models.anthropic import (
+    create_message,
+    effort_param,
+    extract_blocks,
+    interleaved_thinking_param,
+    thinking_param,
+)
 from gloss.prompts import load_prompt, rules_block
 from gloss.wire import FeedbackMode, ToolCallRecord, Transcript, TurnRecord
 
@@ -89,6 +95,7 @@ def run_rollout(
     max_turns: int = 24,
     thinking_budget: int = 8000,
     feedback: FeedbackMode = "ack",
+    effort: str = "medium",
 ) -> Transcript:
     """Play one game, returning the full transcript with per-turn ground truth."""
     state = deal(game_num)
@@ -111,6 +118,8 @@ def run_rollout(
             tools=[PLAY_TOOL],
             max_tokens=max(thinking_budget + 4000, 32000),
             thinking=thinking_param(agent_model, thinking_budget),
+            **effort_param(agent_model, effort),
+            **interleaved_thinking_param(agent_model),
         )
         blocks = extract_blocks(message)
         messages.append({"role": "assistant", "content": blocks.raw_content})

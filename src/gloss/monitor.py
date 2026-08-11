@@ -12,7 +12,13 @@ from __future__ import annotations
 import pydantic
 from loguru import logger
 
-from gloss.models.anthropic import create_message, extract_blocks, thinking_param
+from gloss.models.anthropic import (
+    create_message,
+    effort_param,
+    extract_blocks,
+    interleaved_thinking_param,
+    thinking_param,
+)
 from gloss.prompts import load_prompt, rules_block
 from gloss.wire import Condition, MonitorAnswer, MonitorItem, MonitorRun, Transcript
 
@@ -115,6 +121,7 @@ def run_monitor(
     monitor_model: str,
     condition: Condition,
     thinking_budget: int = 4000,
+    effort: str = "medium",
 ) -> MonitorRun:
     """Ask one monitor to reconstruct one item; parse failures become errored runs."""
     cot_clause = " and the player's current-turn reasoning" if condition == "with-cot" else ""
@@ -131,6 +138,8 @@ def run_monitor(
             tools=[SUBMIT_TOOL],
             max_tokens=max(thinking_budget + 4000, 24000),
             thinking=thinking_param(monitor_model, thinking_budget),
+            **effort_param(monitor_model, effort),
+            **interleaved_thinking_param(monitor_model),
         )
         blocks = extract_blocks(message)
         if blocks.tool_name == "submit_reconstruction":

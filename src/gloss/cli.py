@@ -41,6 +41,7 @@ def rollout(
     max_turns: Annotated[int, typer.Option()] = 24,
     thinking_budget: Annotated[int, typer.Option()] = 8000,
     feedback: Annotated[str, typer.Option(help="'ack' (hard) or 'board' (easy)")] = "ack",
+    effort: Annotated[str, typer.Option(help="Adaptive-model effort level")] = "medium",
     out: Annotated[Path, typer.Option()] = Path("data/transcripts.jsonl"),
 ) -> None:
     """Play each deal with the agent model, recording per-turn ground truth + CoT."""
@@ -57,6 +58,7 @@ def rollout(
                 max_turns=max_turns,
                 thinking_budget=thinking_budget,
                 feedback=feedback,
+                effort=effort,
             )
             for game_num in game_nums
         ]
@@ -90,6 +92,7 @@ def monitor(
     items_path: Annotated[Path, typer.Option("--items")] = Path("data/items.jsonl"),
     monitor_models: Annotated[str, typer.Option(help="Comma-separated")] = DEFAULT_MONITORS,
     thinking_budget: Annotated[int, typer.Option()] = 4000,
+    effort: Annotated[str, typer.Option(help="Adaptive-model effort level")] = "medium",
     out: Annotated[Path, typer.Option()] = Path("data/runs.jsonl"),
 ) -> None:
     """Run each monitor on every item under both conditions (with-cot and no-cot)."""
@@ -109,6 +112,7 @@ def monitor(
                 monitor_model=model,
                 condition=condition,
                 thinking_budget=thinking_budget,
+                effort=effort,
             ): (item.item_id, model, condition)
             for item, model, condition in calls
         }
@@ -117,6 +121,7 @@ def monitor(
             item_id, model, condition = futures[future]
             logger.info(f"{item_id} [{model} / {condition}] done ({len(runs)}/{len(calls)})")
             write_jsonl(runs, out, atomic=True)  # checkpoint after every call
+    write_jsonl(runs, out, atomic=True)  # ensure the file exists even with zero items
     typer.echo(f"{len(runs)} monitor runs -> {out}")
 
 
