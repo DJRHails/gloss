@@ -95,15 +95,25 @@ def monitor(
     effort: Annotated[str, typer.Option(help="Adaptive-model effort level")] = "medium",
     out: Annotated[Path, typer.Option()] = Path("data/runs.jsonl"),
 ) -> None:
-    """Run each monitor on every item under both conditions (with-cot and no-cot)."""
+    """Run each monitor on every item under both conditions (with-cot and no-cot).
+
+    Resumable: runs already checkpointed in ``out`` are skipped, and a call that fails
+    even after retries is logged and left missing (so a re-run picks it up) rather than
+    recorded as a monitor failure — infra faults must not score as zeros.
+    """
     monitor_items = read_jsonl_rows(items_path, MonitorItem)
+    runs: list[MonitorRun] = read_jsonl_rows(out, MonitorRun) if out.exists() else []
+    done = {(run.item_id, run.monitor_model, run.condition) for run in runs}
     calls = [
         (item, model.strip(), condition)
         for model in monitor_models.split(",")
         for condition in CONDITIONS
         for item in monitor_items
+        if (item.item_id, model.strip(), condition) not in done
     ]
-    runs: list[MonitorRun] = []
+    if done:
+        logger.info(f"resuming: {len(done)} runs already checkpointed, {len(calls)} to go")
+    failures = 0
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {
             pool.submit(
@@ -117,11 +127,20 @@ def monitor(
             for item, model, condition in calls
         }
         for future in as_completed(futures):
-            runs.append(future.result())
             item_id, model, condition = futures[future]
-            logger.info(f"{item_id} [{model} / {condition}] done ({len(runs)}/{len(calls)})")
+            try:
+                runs.append(future.result())
+            except Exception as exc:  # noqa: BLE001 — contain one call; re-run resumes it
+                failures += 1
+                logger.warning(f"{item_id} [{model} / {condition}] failed, will resume: {exc}")
+                continue
+            logger.info(
+                f"{item_id} [{model} / {condition}] done ({len(runs)}/{len(done) + len(calls)})"
+            )
             write_jsonl(runs, out, atomic=True)  # checkpoint after every call
     write_jsonl(runs, out, atomic=True)  # ensure the file exists even with zero items
+    if failures:
+        logger.warning(f"{failures} calls failed on API faults — re-run `gloss monitor` to resume")
     typer.echo(f"{len(runs)} monitor runs -> {out}")
 
 

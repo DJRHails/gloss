@@ -17,7 +17,8 @@ from loguru import logger
 from pydantic import BaseModel
 
 RETRYABLE_STATUS = {429, 500, 503, 529}
-_MAX_ATTEMPTS = 8
+_MAX_ATTEMPTS = 12  # overload storms on shared org keys can outlast a short budget
+_MAX_DELAY = 120.0
 
 # Models on the adaptive-thinking API (Claude 4.6+ / 5 family): `budget_tokens` returns a
 # 400 there, and `display: "summarized"` is required for the thinking text to be non-empty
@@ -108,7 +109,7 @@ def create_message(**request: Any) -> anthropic.types.Message:  # request mirror
                 f"retrying in {delay:.0f}s"
             )
             time.sleep(delay)
-            delay = min(delay * 2, 60)
+            delay = min(delay * 2, _MAX_DELAY)
         except anthropic.APIConnectionError:
             if attempt == _MAX_ATTEMPTS:
                 raise
@@ -116,7 +117,7 @@ def create_message(**request: Any) -> anthropic.types.Message:  # request mirror
                 f"anthropic connection error (attempt {attempt}), retrying in {delay:.0f}s"
             )
             time.sleep(delay)
-            delay = min(delay * 2, 60)
+            delay = min(delay * 2, _MAX_DELAY)
     raise AssertionError("unreachable: loop either returns or raises")
 
 
