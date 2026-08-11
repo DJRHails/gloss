@@ -40,6 +40,9 @@ class TurnRecord(BaseModel):
     state_before: GameState
     thinking: str
     native_thinking: str = ""
+    # True when the sample hit max_tokens: the CoT column is cut off (often empty, since
+    # a tool argument that truncates mid-stream arrives as {}), so it is not scorable.
+    truncated: bool = False
     assistant_text: str
     tool_call: ToolCallRecord | None
     tool_result: str | None

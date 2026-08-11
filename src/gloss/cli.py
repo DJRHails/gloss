@@ -42,6 +42,9 @@ def rollout(
     thinking_budget: Annotated[int, typer.Option()] = 8000,
     feedback: Annotated[str, typer.Option(help="'ack' (hard) or 'board' (easy)")] = "ack",
     effort: Annotated[str, typer.Option(help="Adaptive-model effort level")] = "medium",
+    max_output_tokens: Annotated[
+        int, typer.Option(help="Output cap; the scratchpad arm needs room for thinking + a pad")
+    ] = 32000,
     cot_source: Annotated[
         str, typer.Option(help="'native' thinking blocks, or 'scratchpad' tool argument")
     ] = "native",
@@ -68,6 +71,7 @@ def rollout(
                 feedback=feedback,
                 effort=effort,
                 cot_source=cot_source,  # type: ignore[arg-type]
+                max_output_tokens=max_output_tokens,
             )
             for game_num in game_nums
         ]

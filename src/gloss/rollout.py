@@ -94,7 +94,8 @@ def _sample_turn(  # noqa: PLR0913 — one wire call plus its scratchpad drain
 ):
     """Sample until the player calls something other than ``scratchpad``.
 
-    Returns ``(blocks, scratchpad_text)``. Native runs never offer the scratchpad tool, so
+    Returns ``(blocks, scratchpad_text, truncated)``. Native runs never offer the scratchpad
+    tool, so
     this returns on the first sample with an empty pad — one code path for both arms. The
     scratchpad arm accumulates every pad the player writes this turn, which is what the
     neuralese-leaker mechanism treats as the recovered reasoning.
@@ -113,9 +114,19 @@ def _sample_turn(  # noqa: PLR0913 — one wire call plus its scratchpad drain
             **interleaved_thinking_param(agent_model),
         )
         blocks = extract_blocks(message)
+        truncated = blocks.stop_reason == "max_tokens"
+        if truncated:
+            # A scratchpad argument that truncates mid-stream arrives as `{}` — an empty pad that
+            # would otherwise be scored as "the player verbalised nothing". Report, never score.
+            logger.warning(
+                f"max_tokens hit while writing a {blocks.tool_name} argument "
+                f"(pad so far {sum(len(p) for p in pad)} chars) — turn marked truncated"
+            )
         if blocks.tool_name != "scratchpad":
-            return blocks, "\n\n".join(pad)
+            return blocks, "\n\n".join(pad), truncated
         pad.append(str(blocks.tool_input.get("thoughts", "")))
+        if truncated:
+            return blocks, "\n\n".join(pad), True
         messages.append({"role": "assistant", "content": blocks.raw_content})
         messages.append(
             {
@@ -127,7 +138,7 @@ def _sample_turn(  # noqa: PLR0913 — one wire call plus its scratchpad drain
             }
         )
     logger.warning("scratchpad step cap hit; proceeding with the pads written so far")
-    return blocks, "\n\n".join(pad)
+    return blocks, "\n\n".join(pad), False
 
 
 def _record_turn(  # noqa: PLR0913 — pure assembly of one wire row
@@ -141,12 +152,14 @@ def _record_turn(  # noqa: PLR0913 — pure assembly of one wire row
     state_after: GameState,
     stop_reason: str,
     native_thinking: str = "",
+    truncated: bool = False,
 ) -> TurnRecord:
     return TurnRecord(
         turn_index=turn_index,
         state_before=state_before,
         thinking=blocks_thinking,
         native_thinking=native_thinking,
+        truncated=truncated,
         assistant_text=blocks_text,
         tool_call=tool_call,
         tool_result=tool_result,
@@ -165,6 +178,7 @@ def run_rollout(
     feedback: FeedbackMode = "ack",
     effort: str = "medium",
     cot_source: CotSource = "native",
+    max_output_tokens: int = 32000,
 ) -> Transcript:
     """Play one game, returning the full transcript with per-turn ground truth.
 
@@ -191,12 +205,12 @@ def run_rollout(
     turns: list[TurnRecord] = []
     nudges = 0
     while len(turns) < max_turns and not state.is_won():
-        blocks, pad = _sample_turn(
+        blocks, pad, truncated = _sample_turn(
             agent_model=agent_model,
             system=system,
             messages=messages,
             tools=tools,
-            max_tokens=max(thinking_budget + 4000, 32000),
+            max_tokens=max_output_tokens,
             thinking_budget=thinking_budget,
             effort=effort,
         )
@@ -216,6 +230,7 @@ def run_rollout(
                     state,
                     blocks.stop_reason,
                     native_thinking=blocks.thinking,
+                    truncated=truncated,
                 )
             )
             if nudges >= _MAX_NUDGES:
@@ -255,6 +270,7 @@ def run_rollout(
                 state,
                 blocks.stop_reason,
                 native_thinking=blocks.thinking,
+                truncated=truncated,
             )
         )
         logger.info(
