@@ -101,6 +101,27 @@ def test_line_scores_replay_from_true_state() -> None:
     assert next_call.prefix_overlap == 1.0
 
 
+def test_next_call_unparseable_tokens_count_as_mismatch() -> None:
+    # Regression: filtering unparseable tokens let ["xx", "1h", "2h"] score as a
+    # perfect match against ["1h", "2h"]. A garbled prediction must not score.
+    state = deal(1)
+    item = item_for(state, ["1h", "2h"])
+    garbled = MonitorAnswer(predicted_next_moves=["xx", "1h", "2h"])
+    next_call = score_next_call(garbled, item)
+    assert not next_call.exact_match
+    assert not next_call.first_move_match
+    assert next_call.prefix_overlap == 0.0
+
+
+def test_foundation_rank_rejects_multichar_noise() -> None:
+    # Regression: `"TJ" in RANKS` is substring containment, which coerced two-char
+    # noise into a wrong rank instead of a mismatch.
+    state = deal(1)
+    answer = perfect_answer(state, ["1h"])
+    answer.foundations = {"C": "TJ", "D": "23", "H": "", "S": ""}
+    assert score_state(answer, state).foundations_correct == 2  # H and S only
+
+
 def test_next_call_partial_credit() -> None:
     state = deal(1)
     item = item_for(state, ["1h", "2h", "3h"])

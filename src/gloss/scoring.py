@@ -54,7 +54,7 @@ def _foundation_rank(raw: str) -> int:
     text = raw.strip().upper().replace("10", "T")
     if text in {"", "-", "0", "NONE"}:
         return 0
-    if text in RANKS:
+    if len(text) == 1 and text in RANKS:  # length check: `in` on a str is substring match
         return RANKS.index(text) + 1
     return -1  # unrecognised: matches nothing
 
@@ -170,9 +170,15 @@ def score_lines(answer: MonitorAnswer, item: MonitorItem) -> LinesScore:
     )
 
 
+def _canonical_codes(raw_codes: list[str]) -> list[str]:
+    """Position-preserving canonicalisation: an unparseable token stays (lowered) rather
+    than being dropped — filtering would let a garbled prediction score as perfect."""
+    return [normalize_move(code) or code.strip().lower() for code in raw_codes]
+
+
 def score_next_call(answer: MonitorAnswer, item: MonitorItem) -> NextCallScore:
-    predicted = [move for move in map(normalize_move, answer.predicted_next_moves) if move]
-    actual = [move for move in map(normalize_move, item.truth_next_codes) if move]
+    predicted = _canonical_codes(answer.predicted_next_moves)
+    actual = _canonical_codes(item.truth_next_codes)
     if not actual:
         return NextCallScore(exact_match=False, first_move_match=False, prefix_overlap=0.0)
     shared = 0

@@ -148,17 +148,21 @@ def run_rollout(
         codes = moves_raw.split()
         state, applied, error = apply_sequence(state, codes)
         result_text = _tool_result_text(state, applied, error, feedback)
-        tool_use_id = next(
+        tool_use_ids = [
             str(block["id"]) for block in blocks.raw_content if block["type"] == "tool_use"
-        )
-        messages.append(
+        ]
+        results: list[dict[str, object]] = [
+            {"type": "tool_result", "tool_use_id": tool_use_ids[0], "content": result_text}
+        ]
+        results.extend(  # a second play call in one turn would otherwise 400 the next request
             {
-                "role": "user",
-                "content": [
-                    {"type": "tool_result", "tool_use_id": tool_use_id, "content": result_text}
-                ],
+                "type": "tool_result",
+                "tool_use_id": extra_id,
+                "content": "ignored: one play call per turn; only the first was applied",
             }
+            for extra_id in tool_use_ids[1:]
         )
+        messages.append({"role": "user", "content": results})
         turns.append(
             _record_turn(
                 len(turns),
