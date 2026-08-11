@@ -19,6 +19,32 @@ from pydantic import BaseModel
 RETRYABLE_STATUS = {429, 500, 503, 529}
 _MAX_ATTEMPTS = 8
 
+# Models on the adaptive-thinking API (Claude 4.6+ / 5 family): `budget_tokens` returns a
+# 400 there, and `display: "summarized"` is required for the thinking text to be non-empty
+# (the default is "omitted" — empty strings, which would leave this benchmark with no CoT).
+_ADAPTIVE_THINKING_PREFIXES = (
+    "claude-fable",
+    "claude-mythos",
+    "claude-opus-5",
+    "claude-opus-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-sonnet-5",
+    "claude-sonnet-4-6",
+)
+
+
+def thinking_param(model: str, budget_tokens: int) -> dict[str, object]:
+    """The correct ``thinking`` request value for ``model``.
+
+    Adaptive-thinking models ignore the budget (depth is controlled by
+    ``output_config.effort``, left at its default); older models (Haiku 4.5, Sonnet 4.5)
+    take an explicit token budget, minimum 1024.
+    """
+    if model.startswith(_ADAPTIVE_THINKING_PREFIXES):
+        return {"type": "adaptive", "display": "summarized"}
+    return {"type": "enabled", "budget_tokens": max(budget_tokens, 1024)}
+
 
 class CompletionBlocks(BaseModel):
     """The pieces of a response the pipeline cares about, flattened from content blocks."""
@@ -38,12 +64,18 @@ def _client() -> anthropic.Anthropic:
 
 
 def create_message(**request: Any) -> anthropic.types.Message:  # request mirrors messages.create
-    """``messages.create`` with exponential backoff on 429/500/503/529."""
+    """Streamed ``messages.create`` with exponential backoff on 429/500/503/529.
+
+    Always streams and returns the final message: adaptive-thinking turns need a large
+    ``max_tokens`` (thinking counts against it), and non-streaming requests that large
+    hit SDK HTTP timeouts.
+    """
     client = _client()
     delay = 2.0
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            return client.messages.create(**request)
+            with client.messages.stream(**request) as stream:
+                return stream.get_final_message()
         except anthropic.APIStatusError as exc:
             if exc.status_code not in RETRYABLE_STATUS or attempt == _MAX_ATTEMPTS:
                 raise

@@ -13,7 +13,7 @@ from __future__ import annotations
 from loguru import logger
 
 from gloss.freecell import GameState, apply_sequence, deal
-from gloss.models.anthropic import create_message, extract_blocks
+from gloss.models.anthropic import create_message, extract_blocks, thinking_param
 from gloss.prompts import load_prompt, rules_block
 from gloss.wire import FeedbackMode, ToolCallRecord, Transcript, TurnRecord
 
@@ -109,8 +109,8 @@ def run_rollout(
             system=system,
             messages=messages,
             tools=[PLAY_TOOL],
-            max_tokens=thinking_budget + 4000,
-            thinking={"type": "enabled", "budget_tokens": thinking_budget},
+            max_tokens=max(thinking_budget + 4000, 32000),
+            thinking=thinking_param(agent_model, thinking_budget),
         )
         blocks = extract_blocks(message)
         messages.append({"role": "assistant", "content": blocks.raw_content})

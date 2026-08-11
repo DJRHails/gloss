@@ -7,6 +7,7 @@ any stage boundary and every artifact is inspectable.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Annotated
 
@@ -45,18 +46,29 @@ def rollout(
     """Play each deal with the agent model, recording per-turn ground truth + CoT."""
     if feedback not in ("ack", "board"):
         raise typer.BadParameter("feedback must be 'ack' or 'board'")
+    game_nums = [int(part) for part in games.split(",")]
     transcripts: list[Transcript] = []
-    for game_num in (int(part) for part in games.split(",")):
-        transcript = run_rollout(
-            game_num=game_num,
-            agent_model=agent_model,
-            max_turns=max_turns,
-            thinking_budget=thinking_budget,
-            feedback=feedback,
-        )
-        transcripts.append(transcript)
-        logger.info(f"game {game_num}: {len(transcript.turns)} turns, won={transcript.won}")
-        write_jsonl(transcripts, out, atomic=True)  # checkpoint after every game
+    with ThreadPoolExecutor(max_workers=min(len(game_nums), 4)) as pool:
+        futures = [
+            pool.submit(
+                run_rollout,
+                game_num=game_num,
+                agent_model=agent_model,
+                max_turns=max_turns,
+                thinking_budget=thinking_budget,
+                feedback=feedback,
+            )
+            for game_num in game_nums
+        ]
+        for future in as_completed(futures):
+            transcript = future.result()
+            transcripts.append(transcript)
+            logger.info(
+                f"game {transcript.game_num}: {len(transcript.turns)} turns, won={transcript.won}"
+            )
+            write_jsonl(transcripts, out, atomic=True)  # checkpoint after every game
+    transcripts.sort(key=lambda transcript: transcript.game_num)
+    write_jsonl(transcripts, out, atomic=True)
     typer.echo(f"{len(transcripts)} transcripts -> {out}")
 
 
@@ -82,20 +94,29 @@ def monitor(
 ) -> None:
     """Run each monitor on every item under both conditions (with-cot and no-cot)."""
     monitor_items = read_jsonl_rows(items_path, MonitorItem)
+    calls = [
+        (item, model.strip(), condition)
+        for model in monitor_models.split(",")
+        for condition in CONDITIONS
+        for item in monitor_items
+    ]
     runs: list[MonitorRun] = []
-    for model in monitor_models.split(","):
-        for condition in CONDITIONS:
-            for item in monitor_items:
-                runs.append(
-                    run_monitor(
-                        item,
-                        monitor_model=model.strip(),
-                        condition=condition,
-                        thinking_budget=thinking_budget,
-                    )
-                )
-                logger.info(f"{item.item_id} [{model.strip()} / {condition}] done")
-                write_jsonl(runs, out, atomic=True)  # checkpoint after every call
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {
+            pool.submit(
+                run_monitor,
+                item,
+                monitor_model=model,
+                condition=condition,
+                thinking_budget=thinking_budget,
+            ): (item.item_id, model, condition)
+            for item, model, condition in calls
+        }
+        for future in as_completed(futures):
+            runs.append(future.result())
+            item_id, model, condition = futures[future]
+            logger.info(f"{item_id} [{model} / {condition}] done ({len(runs)}/{len(calls)})")
+            write_jsonl(runs, out, atomic=True)  # checkpoint after every call
     typer.echo(f"{len(runs)} monitor runs -> {out}")
 
 
