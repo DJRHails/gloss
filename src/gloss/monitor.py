@@ -86,10 +86,15 @@ def render_context(transcript: Transcript, upto_turn: int) -> str:
 
 
 def build_items(transcript: Transcript, *, min_turn: int = 1) -> list[MonitorItem]:
-    """One item per eligible turn: has prior history, a tool call, and non-empty thinking."""
+    """One item per eligible turn: prior history, a tool call, non-empty CoT, not truncated.
+
+    Truncated turns are excluded rather than scored: a tool argument cut off by ``max_tokens``
+    arrives empty, and counting that as an illegible trace would blame the player for a harness
+    budget. See ``TurnRecord.truncated``.
+    """
     items: list[MonitorItem] = []
     for turn in transcript.turns[min_turn:]:
-        if turn.tool_call is None or not turn.thinking.strip():
+        if turn.tool_call is None or not turn.thinking.strip() or turn.truncated:
             continue
         items.append(
             MonitorItem(
