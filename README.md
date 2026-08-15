@@ -58,6 +58,24 @@ feedback (tool results confirm moves but never re-render the board), so the curr
 turn's CoT is the richest surviving record of the player's own state tracking; pass
 `--feedback board` for the easy variant where the log gives the state away.
 
+### Where the CoT column comes from
+
+`--cot-source` picks the channel the transcript's CoT is read from, and the arm is part of
+the transcript id so several can share one dataset:
+
+| arm | the player gets | CoT column is |
+| --- | --- | --- |
+| `native` | the `play` tool, extended thinking on | the API's thinking blocks |
+| `scratchpad-directed` | a `scratchpad` tool it is told to do *all* its thinking in | the pad |
+| `scratchpad-offered` | the same tool, described and nothing more | the pad |
+
+The two scratchpad arms leave native thinking on underneath and always record it in
+`native_thinking`, so `gloss channels` can ask which channel a turn actually used. They
+exist as a **pair**: the directed wording is the neuralese-leaker / `deep_think` mechanism
+as usually pitched, and the offered wording is its control — if the pad only displaces
+native thinking under the forceful instruction, that is the prompt talking, not a property
+of the model.
+
 ## Running it
 
 ```sh
