@@ -79,14 +79,17 @@ class TurnSample(BaseModel):
 
     ``pad`` concatenates every ``scratchpad`` argument written this turn — including a pad
     that shared a response with the ``play`` call, which is why the drain reads all tool_use
-    blocks rather than the first. ``response_signatures`` records the content-block shape of
-    each API response in the turn (see
+    blocks rather than the first. ``native`` does the same for the API's thinking blocks across
+    the whole drain, so a turn that thought natively while writing a pad is not recorded as
+    pad-only just because the *last* response held no thinking.
+    ``response_signatures`` records the content-block shape of each API response in the turn (see
     :attr:`gloss.models.anthropic.CompletionBlocks.block_signature`), so the block
     combinations the API returned stay auditable in the transcript.
     """
 
     blocks: CompletionBlocks
     pad: str
+    native: str
     truncated: bool
     response_signatures: list[str]
 
@@ -203,6 +206,7 @@ def _sample_turn(  # noqa: PLR0913 — one wire call plus its scratchpad drain
     recovered reasoning.
     """
     pad: list[str] = []
+    native: list[str] = []
     signatures: list[str] = []
     blocks: CompletionBlocks | None = None
     for _ in range(_MAX_SCRATCHPAD_STEPS):
@@ -219,6 +223,8 @@ def _sample_turn(  # noqa: PLR0913 — one wire call plus its scratchpad drain
         blocks = extract_blocks(message)
         signatures.append(blocks.block_signature)
         pad.extend(_pad_text(blocks))
+        if blocks.thinking:
+            native.append(blocks.thinking)
         truncated = blocks.stop_reason == "max_tokens"
         if truncated:
             # A tool argument that truncates mid-stream arrives as `{}` — an empty pad that
@@ -231,6 +237,7 @@ def _sample_turn(  # noqa: PLR0913 — one wire call plus its scratchpad drain
             return TurnSample(
                 blocks=blocks,
                 pad="\n\n".join(pad),
+                native="\n\n".join(native),
                 truncated=truncated,
                 response_signatures=signatures,
             )
@@ -240,7 +247,11 @@ def _sample_turn(  # noqa: PLR0913 — one wire call plus its scratchpad drain
         raise AssertionError("scratchpad drain sampled no response")
     logger.warning("scratchpad step cap hit; proceeding with the pads written so far")
     return TurnSample(
-        blocks=blocks, pad="\n\n".join(pad), truncated=False, response_signatures=signatures
+        blocks=blocks,
+        pad="\n\n".join(pad),
+        native="\n\n".join(native),
+        truncated=False,
+        response_signatures=signatures,
     )
 
 
@@ -318,7 +329,7 @@ def run_rollout(
             effort=effort,
         )
         blocks = sample.blocks
-        cot = sample.pad if cot_source in SCRATCHPAD_ADDENDA else blocks.thinking
+        cot = sample.pad if cot_source in SCRATCHPAD_ADDENDA else sample.native
         messages.append({"role": "assistant", "content": blocks.raw_content})
         state_before = state
         play = blocks.first_call("play")
@@ -334,7 +345,7 @@ def run_rollout(
                     [],
                     state,
                     blocks.stop_reason,
-                    native_thinking=blocks.thinking,
+                    native_thinking=sample.native,
                     truncated=sample.truncated,
                     response_signatures=sample.response_signatures,
                 )
@@ -369,7 +380,7 @@ def run_rollout(
                 [line.split(":")[0] for line in applied],
                 state,
                 blocks.stop_reason,
-                native_thinking=blocks.thinking,
+                native_thinking=sample.native,
                 truncated=sample.truncated,
                 response_signatures=sample.response_signatures,
             )

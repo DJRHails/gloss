@@ -194,3 +194,26 @@ def test_truncated_pad_is_acked_before_the_nudge(scripted) -> None:
     nudge_content = player.requests[1][-1]["content"]
     assert isinstance(nudge_content, list)
     assert nudge_content[-1] == {"type": "text", "text": gloss.rollout._NUDGE}
+
+
+def test_native_thinking_accumulates_across_the_drain(scripted) -> None:
+    """Thinking from a pad-writing response counts too, or the channel census undercounts it."""
+    scripted(
+        [
+            message(
+                [
+                    ThinkingBlock(thinking="FIRST", signature="sig", type="thinking"),
+                    pad_block("tu_pad", "PAD"),
+                ]
+            ),
+            message(
+                [
+                    ThinkingBlock(thinking="SECOND", signature="sig", type="thinking"),
+                    play_block("tu_play"),
+                ]
+            ),
+        ]
+    )
+    turn = scratchpad_rollout().turns[0]
+    assert turn.native_thinking == "FIRST\n\nSECOND"
+    assert turn.thinking == "PAD"  # the CoT column stays the pad on this arm

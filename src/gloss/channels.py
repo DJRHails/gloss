@@ -24,6 +24,13 @@ from gloss.wire import Transcript, TurnRecord
 
 PAD_TOOL_BLOCK = "tool_use:scratchpad"
 PLAY_TOOL_BLOCK = "tool_use:play"
+# A channel that carries fewer characters than this is doing handoff, not reasoning: the
+# directed arm's turns that "use both channels" include ones whose native thinking is a
+# single line ("Let me play those moves") against a 32,000-character pad. Counting those as
+# both-channel turns would answer the relocation question yes on a technicality, so the census
+# reports the strict count (any non-empty channel, comparable to PR #1's tally) and this
+# substantive one side by side.
+SUBSTANTIVE_CHARS = 1_000
 
 
 class ChannelCensus(BaseModel):
@@ -33,6 +40,7 @@ class ChannelCensus(BaseModel):
     offers_scratchpad: bool  # a native arm has no pad channel, so "both" is not an estimate there
     num_turns: int
     both_channels: int
+    both_substantive: int  # both channels over SUBSTANTIVE_CHARS, not a handoff line
     pad_only: int
     native_only: int
     neither: int
@@ -97,6 +105,11 @@ def channel_census(transcripts: list[Transcript]) -> list[ChannelCensus]:
                 offers_scratchpad=any(t.cot_source != "native" for t in group),
                 num_turns=len(turns),
                 both_channels=sum(1 for pad, native in used if pad and native),
+                both_substantive=sum(
+                    1
+                    for pad, native in chars
+                    if pad >= SUBSTANTIVE_CHARS and native >= SUBSTANTIVE_CHARS
+                ),
                 pad_only=sum(1 for pad, native in used if pad and not native),
                 native_only=sum(1 for pad, native in used if native and not pad),
                 neither=sum(1 for pad, native in used if not pad and not native),
@@ -137,15 +150,17 @@ def response_census(transcripts: list[Transcript]) -> list[ResponseCensus]:
 def channel_table(censuses: list[ChannelCensus]) -> str:
     """Markdown table of the four-way channel split, with a Wilson interval on "both"."""
     header = (
-        "| arm | turns | both channels | pad only | native only | neither | truncated "
-        "| mean pad chars | mean native chars |\n|---|---|---|---|---|---|---|---|---|"
+        f"| arm | turns | both channels | both over {SUBSTANTIVE_CHARS} chars | pad only "
+        "| native only | neither | truncated | mean pad chars | mean native chars |\n"
+        "|---|---|---|---|---|---|---|---|---|---|"
     )
     rows: list[str] = []
     for census in censuses:
         both = (
-            rate_with_ci(census.both_channels, census.num_turns)
+            f"{rate_with_ci(census.both_channels, census.num_turns)} "
+            f"| {rate_with_ci(census.both_substantive, census.num_turns)}"
             if census.offers_scratchpad
-            else "n/a (no pad offered)"
+            else "n/a (no pad offered) | n/a"
         )
         rows.append(
             f"| {census.arm} | {census.num_turns} | {both} "
