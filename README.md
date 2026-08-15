@@ -153,48 +153,55 @@ summarized thinking (the API never returns the raw CoT); and an Opus-tier monito
 is a flag away (`--monitor-models claude-opus-5,...`) but was skipped here for
 rate-limit reasons.
 
-## Results (channel-split wording control, 2026-08-15)
+## Status of this branch: superseded on the wording question
 
-**The relocation reading does not replicate, including in its own arm.** The scratchpad-CoT PR
-reported that across 19 Opus 5 turns *zero* used both channels — where the model wrote a pad it did
-no native thinking, and vice versa — and read that as the pad *relocating* reasoning rather than
-revealing it. Re-run with a 128k output budget and no move cap, on `claude-opus-5` at `medium`
-effort over 12 deals:
+**This branch's headline claim was wrong, and it is retracted here.** It reported that the
+relocation reading "does not replicate" because co-use given a pad came out at 0.40 [0.22, 0.61]
+(8/20) under the forceful wording. That number is an artifact of the threshold: `classify_turn` here
+counts a channel as used when it is merely **non-empty**, i.e. a 1-character threshold.
 
-| arm | reasoning turns | pad use (of reasoning turns) | co-use given a pad |
-| --- | --- | --- | --- |
-| `scratchpad_urged` | 32 | 0.62 [0.45, 0.77] 20/32 | **0.40 [0.22, 0.61] 8/20** |
-| `scratchpad_offered` | 17 | 0.24 [0.10, 0.47] 4/17 | 0.75 [0.30, 0.95] 3/4 |
+Re-checked against this branch's own data at higher thresholds:
 
-95% Wilson. Same forceful wording as the original, and 8 of 20 pad-writing turns *also* did native
-thinking. "Zero of 19" was not a stable property of the mechanism.
+| threshold | `scratchpad_urged` co-use | `scratchpad_offered` co-use |
+| --- | --- | --- |
+| 1 char | 8/20 = 0.40 | 4/6 = 0.67 |
+| 200 chars | **0/19 = 0.00** | **0/2 = 0.00** |
+| 1,000 chars | **0/12 = 0.00** | 0/0 = no data |
 
-**The wording does something real, but it is not exclusivity.** It changes pad *uptake* sharply —
-0.62 of reasoning turns write a pad when urged, 0.24 when the same tool is merely offered — which is
-what makes the control a working manipulation rather than a null edit. What it does not do is create
-an exclusive split: co-use given a pad is nowhere near zero under either wording. So there is no
-relocation to attribute to the prompt, because there is no exclusivity to explain.
+On all eight of the "both channels" turns the smaller channel was **25–154 characters** — a handoff
+line, against pads and thinks of hundreds to tens of thousands. So the exclusivity holds at any
+substantive threshold, and the refutation was measuring channel *touches*, not channel *use*.
 
-**The original zero is best explained by the output budget, not by the model.** Four `urged` turns
-here truncated, and every one shows the same signature: native thinking consumed the *entire* 128k
-budget (131k–137k characters) with the pad arriving empty. Such a turn presents as native-only. At
-the original run's 32k and 64k budgets that failure would be far more frequent, systematically
-converting would-be both-channel turns into native-only ones and driving co-use toward zero.
+[PR #5](https://github.com/DJRHails/gloss/pull/5) reached the correct answer first and with a better
+design — deals 1-40 under each wording, both thresholds reported side by side, and the handoff-line
+magnitudes quantified (max 79 characters directed, 413 offered). Its conclusion stands: the channel
+exclusivity is **not** prompt-induced. `main` also already carries the mild-wording arm as
+`scratchpad-directed` / `scratchpad-offered` and a threshold-aware `channels`, so this branch's
+`scratchpad_urged` / `scratchpad_offered` implementation is a redundant duplicate with worse names.
 
-Which also means **raising the output budget is not the fix**: thinking expands to fill whatever it
-is given (64k–68k characters at a 64k budget, 131k–137k at 128k). `--thinking-budget` is a no-op on
-adaptive models — `thinking_param` returns `{"type": "adaptive"}` and depth is set by
-`output_config.effort` — so the actual lever is `--effort`, and that is what a future run should turn
-down.
+### What here is still additive
 
-Caveats. The `offered` arm's co-use rests on only 4 pad-writing turns, because low uptake is exactly
-what the weak wording produces; its interval [0.30, 0.95] excludes nothing useful, and the
-load-bearing refutation is the `urged` arm at n=20, which is the same condition the original claim
-was made in. One model, one task, `medium` effort throughout. Truncated turns are excluded rather
-than scored, so the rates describe turns the harness could actually read.
+Two findings from this branch's run are not in `main` and survive the retraction, because they are
+about the instrument rather than the wording:
 
-Provenance: `.data/gloss-powered/channel-split.jsonl` on the touchstone side, regenerated with
-`gloss channels`. The run was still completing its last deals when these numbers were taken.
+- **Raising the output budget does not bound thinking — it expands to fill it.** Every truncated
+  turn here shows native thinking consuming the *entire* budget: 64k–68k characters at a 64k cap,
+  and **131k–137k characters at a 128k cap**, with the pad then arriving empty. So the "needs 128k"
+  fix from the original truncation diagnosis does not work.
+- **`--thinking-budget` is a no-op on adaptive models**, which is why. `thinking_param` returns
+  `{"type": "adaptive"}` for `claude-opus-5` and depth is set by `output_config.effort`, so the
+  budget argument is silently ignored and the real lever is **`--effort`**. A run that needs bounded
+  thinking should turn effort down rather than raise `max_tokens`.
+
+Also measured, and worth keeping even though it refutes this branch's own `--max-moves-per-call`
+knob: a per-call move cap raises the *turn* count but not the reasoning-bearing turn count. At a cap
+of 3, `claude-opus-5` plans once on turn 0 (an 18k–43k character pad) then emits bare three-move
+calls with both channels empty — 30 of 32 turns were `neither`, about 6% reasoning-bearing against
+~100% uncapped. Capping suppresses re-planning, so deals, not turns, are the unit of yield.
+
+Provenance: `.data/gloss-powered/channel-split.jsonl` on the touchstone side (12 deals
+`scratchpad_urged`, 11 `scratchpad_offered`, `claude-opus-5`, medium effort, 128k output budget),
+re-checked with the threshold sweep above.
 
 ## Repo notes
 
