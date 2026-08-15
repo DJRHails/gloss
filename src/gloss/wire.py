@@ -22,6 +22,10 @@ Condition = Literal["with-cot", "no-cot", "swapped-cot"]
 # goes there and should be long, "scratchpad-offered" describes the tool and nothing more.
 # The pair is the control for "did the wording cause the channel relocation?".
 CotSource = Literal["native", "scratchpad-directed", "scratchpad-offered"]
+# Why a recorded turn produced no monitor item. See `gloss.monitor.item_exclusion` for the
+# priority order; "no-prior-history" is structural (turn 0 can never yield), the other three
+# are losses.
+ItemExclusion = Literal["no-prior-history", "no-tool-call", "truncated", "empty-cot"]
 
 
 class ToolCallRecord(BaseModel):

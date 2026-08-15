@@ -16,7 +16,16 @@ from loguru import logger
 
 from gloss.channels import channel_census, channel_table, response_census, response_table
 from gloss.freecell import deal as ms_deal
-from gloss.monitor import build_items, run_monitor, swapped_cot_donors
+from gloss.monitor import (
+    arm_yield_table,
+    arm_yields,
+    build_items,
+    deal_yield_table,
+    run_monitor,
+    swapped_cot_donors,
+    transcript_yield,
+    yield_statement,
+)
 from gloss.rollout import run_rollout
 from gloss.scoring import score_run, summarize, summary_table
 from gloss.utils.jsonl import read_jsonl_rows, write_jsonl
@@ -131,12 +140,26 @@ def items(
     transcripts: Annotated[Path, typer.Option()] = Path("data/transcripts.jsonl"),
     out: Annotated[Path, typer.Option()] = Path("data/items.jsonl"),
 ) -> None:
-    """Build monitor items (one per eligible turn) from recorded transcripts."""
+    """Build monitor items (one per eligible turn) from recorded transcripts.
+
+    Also reports the yield: per deal and per arm, how many turns went in, how many items came
+    out, and which of the four eligibility conditions excluded the rest. Item yield is the
+    binding constraint on every powered comparison in this benchmark, so it is printed on every
+    build rather than hidden behind a flag.
+    """
+    transcript_rows = read_jsonl_rows(transcripts, Transcript)
     rows: list[MonitorItem] = []
-    for transcript in read_jsonl_rows(transcripts, Transcript):
+    for transcript in transcript_rows:
         rows.extend(build_items(transcript))
     write_jsonl(rows, out, atomic=True)
-    typer.echo(f"{len(rows)} items -> {out}")
+    typer.echo(deal_yield_table([transcript_yield(t) for t in transcript_rows]))
+    typer.echo()
+    summaries = arm_yields(transcript_rows)
+    typer.echo(arm_yield_table(summaries))
+    typer.echo()
+    for summary in summaries:
+        typer.echo(yield_statement(summary))
+    typer.echo(f"\n{len(rows)} items -> {out}")
 
 
 @app.command()
