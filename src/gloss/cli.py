@@ -14,12 +14,13 @@ from typing import Annotated
 import typer
 from loguru import logger
 
+from gloss.channels import render_table, split_for
 from gloss.freecell import deal as ms_deal
 from gloss.monitor import build_items, run_monitor, swapped_cot_donors
 from gloss.rollout import run_rollout
 from gloss.scoring import score_run, summarize, summary_table
 from gloss.utils.jsonl import read_jsonl_rows, write_jsonl
-from gloss.wire import Condition, MonitorItem, MonitorRun, Transcript
+from gloss.wire import SCRATCHPAD_SOURCES, Condition, MonitorItem, MonitorRun, Transcript
 
 app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
@@ -43,18 +44,27 @@ def rollout(
     feedback: Annotated[str, typer.Option(help="'ack' (hard) or 'board' (easy)")] = "ack",
     effort: Annotated[str, typer.Option(help="Adaptive-model effort level")] = "medium",
     max_output_tokens: Annotated[
-        int, typer.Option(help="Output cap; the scratchpad arm needs room for thinking + a pad")
-    ] = 32000,
+        int, typer.Option(help="Output cap; a scratchpad arm needs room for thinking AND a pad")
+    ] = 128000,
+    max_moves_per_call: Annotated[
+        int,
+        typer.Option(
+            help="Cap moves per play call (0 = uncapped). A cap raises turns, so items, per deal"
+        ),
+    ] = 0,
     cot_source: Annotated[
-        str, typer.Option(help="'native' thinking blocks, or 'scratchpad' tool argument")
+        str,
+        typer.Option(help=f"'native' thinking blocks, or one of {', '.join(SCRATCHPAD_SOURCES)}"),
     ] = "native",
     out: Annotated[Path, typer.Option()] = Path("data/transcripts.jsonl"),
 ) -> None:
     """Play each deal with the agent model, recording per-turn ground truth + CoT."""
     if feedback not in ("ack", "board"):
         raise typer.BadParameter("feedback must be 'ack' or 'board'")
-    if cot_source not in ("native", "scratchpad"):
-        raise typer.BadParameter("cot-source must be 'native' or 'scratchpad'")
+    if cot_source not in ("native", *SCRATCHPAD_SOURCES):
+        raise typer.BadParameter(f"cot-source must be 'native' or one of {SCRATCHPAD_SOURCES}")
+    if max_moves_per_call < 0:
+        raise typer.BadParameter("max-moves-per-call must be >= 0 (0 means uncapped)")
     game_nums = [int(part) for part in games.split(",")]
     # Append: the two cot_source arms are separate rollouts that must land in one dataset.
     existing = read_jsonl_rows(out, Transcript) if out.exists() else []
@@ -72,6 +82,7 @@ def rollout(
                 effort=effort,
                 cot_source=cot_source,  # type: ignore[arg-type]
                 max_output_tokens=max_output_tokens,
+                max_moves_per_call=max_moves_per_call,
             )
             for game_num in game_nums
         ]
@@ -89,6 +100,36 @@ def rollout(
     transcripts.sort(key=lambda transcript: transcript.transcript_id)
     write_jsonl(transcripts, out, atomic=True)
     typer.echo(f"{len(transcripts)} transcripts -> {out}")
+
+
+@app.command()
+def channels(
+    transcripts: Annotated[Path, typer.Option()] = Path("data/transcripts.jsonl"),
+    out: Annotated[Path, typer.Option()] = Path("data/channels.json"),
+) -> None:
+    """Report per-arm channel usage: does a scratchpad relocate reasoning or reveal it?
+
+    Headline is co-use — P(native thinking present | the player wrote a pad) — with pad-use rate as
+    its denominator, and the ``native`` arm as the null control (pad use there must be 0.00).
+    """
+    rows = read_jsonl_rows(transcripts, Transcript)
+    present = [(t.cot_source or "native") for t in rows]
+    arms = [arm for arm in ("native", *SCRATCHPAD_SOURCES) if arm in present]
+    if not arms:
+        raise typer.BadParameter(f"no recognised cot_source in {transcripts}")
+    splits = [split_for(rows, arm) for arm in arms]
+    typer.echo(render_table(splits))
+    control = next((s for s in splits if s.cot_source == "native"), None)
+    if control is not None and control.pad_use.successes:
+        # Loud, not silent: the pad detector firing on an arm that was never offered the tool
+        # invalidates every other number in this table.
+        logger.error(
+            f"NULL CONTROL FAILED: native arm shows {control.pad_use.successes} pad turns; "
+            "the pad detector is firing on something else"
+        )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps([split.model_dump() for split in splits], indent=2), encoding="utf-8")
+    typer.echo(f"\n-> {out}")
 
 
 @app.command()

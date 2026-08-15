@@ -15,10 +15,16 @@ from gloss.freecell import GameState
 
 FeedbackMode = Literal["ack", "board"]
 Condition = Literal["with-cot", "no-cot", "swapped-cot"]
-# Which channel the `cot` column is sourced from. "native" is the API thinking blocks;
-# "scratchpad" is a tool argument the player was told to treat as its reasoning channel
-# (the neuralese-leaker / deep_think mechanism), with native thinking left on underneath.
-CotSource = Literal["native", "scratchpad"]
+# Which channel the `cot` column is sourced from, and — for the two scratchpad arms — how hard
+# the player was pushed to use it. "native" is the API thinking blocks. Both scratchpad arms run
+# the neuralese-leaker / deep_think mechanism with native thinking left on underneath, and differ
+# ONLY in wording, which is the whole point: the first gloss run found zero of 19 turns using both
+# channels, and a pad instruction forceful enough to *cause* that split is indistinguishable from
+# one that merely *reveals* it. "urged" is the original forceful wording (a system addendum plus a
+# tool description claiming the pad is the model's reasoning channel); "offered" is the control —
+# the same tool, neutrally described, with no addendum and no instruction to think in it.
+CotSource = Literal["native", "scratchpad_urged", "scratchpad_offered"]
+SCRATCHPAD_SOURCES = ("scratchpad_urged", "scratchpad_offered")
 
 
 class ToolCallRecord(BaseModel):
@@ -40,6 +46,12 @@ class TurnRecord(BaseModel):
     state_before: GameState
     thinking: str
     native_thinking: str = ""
+    # Billed thinking tokens, when the API reports them. Records which channel actually spent the
+    # output budget: the first scratchpad run's truncations were caused by native thinking consuming
+    # it (64k-68k characters per truncated turn), not by an oversized pad, and that was diagnosed
+    # only after the fact. Recording it makes the next diagnosis data rather than reconstruction.
+    native_thinking_tokens: int | None = None
+    output_tokens: int | None = None
     # True when the sample hit max_tokens: the CoT column is cut off (often empty, since
     # a tool argument that truncates mid-stream arrives as {}), so it is not scorable.
     truncated: bool = False

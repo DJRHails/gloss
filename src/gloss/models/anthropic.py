@@ -80,6 +80,11 @@ class CompletionBlocks(BaseModel):
     tool_input: dict[str, object]  # tool_use input is schema-free JSON at this boundary
     raw_content: list[dict[str, object]]  # verbatim blocks, resent to preserve signatures
     stop_reason: str
+    # Billed thinking tokens when the API reports them. Distinct from ``thinking`` being
+    # non-empty: a turn can bill thinking and return no visible blocks. Needed to tell a
+    # truncation caused by native thinking eating the budget from one caused by a long pad.
+    thinking_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 def _client() -> anthropic.Anthropic:
@@ -149,6 +154,7 @@ def extract_blocks(message: anthropic.types.Message) -> CompletionBlocks:
         elif block.type == "tool_use" and tool_name is None:
             tool_name = block.name
             tool_input = dict(block.input)
+    details = getattr(message.usage, "output_tokens_details", None)
     return CompletionBlocks(
         thinking="\n\n".join(thinking_parts),
         text="\n\n".join(text_parts),
@@ -156,4 +162,6 @@ def extract_blocks(message: anthropic.types.Message) -> CompletionBlocks:
         tool_input=tool_input,
         raw_content=[_wire_block(block) for block in message.content],
         stop_reason=message.stop_reason or "",
+        thinking_tokens=getattr(details, "thinking_tokens", None) if details else None,
+        output_tokens=getattr(message.usage, "output_tokens", None),
     )
