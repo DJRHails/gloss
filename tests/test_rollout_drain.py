@@ -83,7 +83,7 @@ def scratchpad_rollout(max_turns: int = 1):
         game_num=1,
         agent_model="claude-opus-5",
         max_turns=max_turns,
-        cot_source="scratchpad",
+        cot_source="scratchpad-directed",
     )
 
 

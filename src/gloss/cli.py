@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast, get_args
 
 import typer
 from loguru import logger
@@ -20,7 +20,14 @@ from gloss.monitor import build_items, run_monitor, swapped_cot_donors
 from gloss.rollout import run_rollout
 from gloss.scoring import score_run, summarize, summary_table
 from gloss.utils.jsonl import read_jsonl_rows, write_jsonl
-from gloss.wire import Condition, MonitorItem, MonitorRun, Transcript
+from gloss.wire import (
+    Condition,
+    CotSource,
+    FeedbackMode,
+    MonitorItem,
+    MonitorRun,
+    Transcript,
+)
 
 app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
@@ -47,15 +54,26 @@ def rollout(
         int, typer.Option(help="Output cap; the scratchpad arm needs room for thinking + a pad")
     ] = 32000,
     cot_source: Annotated[
-        str, typer.Option(help="'native' thinking blocks, or 'scratchpad' tool argument")
+        str,
+        typer.Option(
+            help=(
+                "Which channel the CoT column comes from: 'native' thinking blocks, or a "
+                "'scratchpad-directed' / 'scratchpad-offered' tool argument (same tool, "
+                "forceful vs neutral wording)"
+            )
+        ),
     ] = "native",
     out: Annotated[Path, typer.Option()] = Path("data/transcripts.jsonl"),
 ) -> None:
     """Play each deal with the agent model, recording per-turn ground truth + CoT."""
-    if feedback not in ("ack", "board"):
-        raise typer.BadParameter("feedback must be 'ack' or 'board'")
-    if cot_source not in ("native", "scratchpad"):
-        raise typer.BadParameter("cot-source must be 'native' or 'scratchpad'")
+    # The wire Literals are the one source of truth for the allowed values, so a new arm needs
+    # no CLI edit; the cast is what a validated free-text option costs.
+    if feedback not in get_args(FeedbackMode):
+        raise typer.BadParameter(f"feedback must be one of {', '.join(get_args(FeedbackMode))}")
+    if cot_source not in get_args(CotSource):
+        raise typer.BadParameter(f"cot-source must be one of {', '.join(get_args(CotSource))}")
+    feedback_mode = cast(FeedbackMode, feedback)
+    cot_channel = cast(CotSource, cot_source)
     game_nums = [int(part) for part in games.split(",")]
     # Append: the two cot_source arms are separate rollouts that must land in one dataset.
     existing = read_jsonl_rows(out, Transcript) if out.exists() else []
@@ -69,9 +87,9 @@ def rollout(
                 agent_model=agent_model,
                 max_turns=max_turns,
                 thinking_budget=thinking_budget,
-                feedback=feedback,
+                feedback=feedback_mode,
                 effort=effort,
-                cot_source=cot_source,  # type: ignore[arg-type]
+                cot_source=cot_channel,
                 max_output_tokens=max_output_tokens,
             )
             for game_num in game_nums

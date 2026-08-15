@@ -59,6 +59,14 @@ SCRATCHPAD_TOOL: dict[str, object] = {
         "required": ["thoughts"],
     },
 }
+SCRATCHPAD_ADDENDA: dict[CotSource, str] = {
+    # Same tool, two system-prompt wordings: "directed" tells the player its whole reasoning
+    # belongs in the pad (the wording PR #1 ran, under which no turn used both channels),
+    # "offered" only says the tool exists. Membership in this map is also what makes an arm a
+    # scratchpad arm at all — the native arm is never offered the tool.
+    "scratchpad-directed": "scratchpad_directed_addendum",
+    "scratchpad-offered": "scratchpad_offered_addendum",
+}
 _SCRATCHPAD_ACK = "Scratchpad recorded. Continue, or call `play` once you have settled on a line."
 _EXTRA_PLAY_REFUSAL = "ignored: one play call per turn; only the first was applied"
 _MAX_SCRATCHPAD_STEPS = 6
@@ -96,6 +104,38 @@ def _tool_result_text(
         lines.append("")
         lines.append(state.render())
     return "\n".join(lines) if lines else "no moves applied"
+
+
+def player_system(*, feedback: FeedbackMode, cot_source: CotSource) -> str:
+    """The player's system prompt: shared rules, the feedback clause, and the arm's addendum.
+
+    A scratchpad arm appends its addendum verbatim; the two arms differ in nothing else, which
+    is what makes the pair a wording control rather than two different tasks.
+    """
+    system = load_prompt(
+        "agent_system", rules=rules_block(), feedback_clause=_FEEDBACK_CLAUSE[feedback]
+    )
+    if cot_source in SCRATCHPAD_ADDENDA:
+        return f"{system}\n\n{load_prompt(SCRATCHPAD_ADDENDA[cot_source])}"
+    return system
+
+
+def transcript_id(*, game_num: int, agent_model: str, cot_source: CotSource) -> str:
+    """``'game617-claude-opus-5-scratchpad-offered'`` — deal, player, and arm.
+
+    The arm is part of the id so the same deal can be replayed under every arm and land in one
+    dataset without two rollouts claiming the same transcript (``gloss rollout`` replaces rows
+    by id). The native arm keeps the bare ``game<n>-<model>`` form the v2 corpus uses.
+    """
+    suffix = "" if cot_source == "native" else f"-{cot_source}"
+    return f"game{game_num}-{agent_model}{suffix}"
+
+
+def player_tools(cot_source: CotSource) -> list[dict[str, object]]:
+    """The tools offered to the player: ``play`` always, ``scratchpad`` on a scratchpad arm."""
+    if cot_source in SCRATCHPAD_ADDENDA:
+        return [SCRATCHPAD_TOOL, PLAY_TOOL]
+    return [PLAY_TOOL]
 
 
 def _pad_text(blocks: CompletionBlocks) -> list[str]:
@@ -248,20 +288,17 @@ def run_rollout(
 ) -> Transcript:
     """Play one game, returning the full transcript with per-turn ground truth.
 
-    ``cot_source="scratchpad"`` runs the neuralese-leaker / deep_think mechanism: native
-    thinking stays on, but the player is also given a `scratchpad` tool framed as its
-    reasoning channel, and the transcript's CoT column is sourced from that tool argument
-    instead of the API's thinking blocks. Both channels are kept — ``native_thinking``
-    always holds the API's own blocks — so the arms can be compared on the same turns.
+    The two scratchpad ``cot_source`` arms run the neuralese-leaker / deep_think mechanism:
+    native thinking stays on, but the player is also given a `scratchpad` tool, and the
+    transcript's CoT column is sourced from that tool argument instead of the API's thinking
+    blocks. Both channels are kept — ``native_thinking`` always holds the API's own blocks —
+    so the arms can be compared on the same turns. ``scratchpad-directed`` instructs the
+    player that all its reasoning belongs in the pad; ``scratchpad-offered`` just describes
+    the tool, which is the control for whether the wording causes the channel relocation.
     """
     state = deal(game_num)
-    system = load_prompt(
-        "agent_system", rules=rules_block(), feedback_clause=_FEEDBACK_CLAUSE[feedback]
-    )
-    tools: list[dict[str, object]] = [PLAY_TOOL]
-    if cot_source == "scratchpad":
-        system = f"{system}\n\n{load_prompt('scratchpad_addendum')}"
-        tools = [SCRATCHPAD_TOOL, PLAY_TOOL]
+    system = player_system(feedback=feedback, cot_source=cot_source)
+    tools = player_tools(cot_source)
     messages: list[dict[str, object]] = [
         {
             "role": "user",
@@ -281,7 +318,7 @@ def run_rollout(
             effort=effort,
         )
         blocks = sample.blocks
-        cot = sample.pad if cot_source == "scratchpad" else blocks.thinking
+        cot = sample.pad if cot_source in SCRATCHPAD_ADDENDA else blocks.thinking
         messages.append({"role": "assistant", "content": blocks.raw_content})
         state_before = state
         play = blocks.first_call("play")
@@ -342,8 +379,9 @@ def run_rollout(
             f"{len(applied)} applied{' (rejection)' if error else ''}"
         )
     return Transcript(
-        transcript_id=f"game{game_num}-{agent_model}"
-        + ("-scratchpad" if cot_source == "scratchpad" else ""),
+        transcript_id=transcript_id(
+            game_num=game_num, agent_model=agent_model, cot_source=cot_source
+        ),
         game_num=game_num,
         agent_model=agent_model,
         feedback_mode=feedback,

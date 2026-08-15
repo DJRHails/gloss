@@ -15,10 +15,13 @@ from gloss.freecell import GameState
 
 FeedbackMode = Literal["ack", "board"]
 Condition = Literal["with-cot", "no-cot", "swapped-cot"]
-# Which channel the `cot` column is sourced from. "native" is the API thinking blocks;
-# "scratchpad" is a tool argument the player was told to treat as its reasoning channel
-# (the neuralese-leaker / deep_think mechanism), with native thinking left on underneath.
-CotSource = Literal["native", "scratchpad"]
+# Which channel the `cot` column is sourced from. "native" is the API thinking blocks; the
+# two scratchpad arms source it from a tool argument (the neuralese-leaker / deep_think
+# mechanism) with native thinking left on underneath, and differ only in how hard the system
+# prompt pushes the player into the pad: "scratchpad-directed" instructs that all reasoning
+# goes there and should be long, "scratchpad-offered" describes the tool and nothing more.
+# The pair is the control for "did the wording cause the channel relocation?".
+CotSource = Literal["native", "scratchpad-directed", "scratchpad-offered"]
 
 
 class ToolCallRecord(BaseModel):
