@@ -43,6 +43,11 @@ class TurnRecord(BaseModel):
     # True when the sample hit max_tokens: the CoT column is cut off (often empty, since
     # a tool argument that truncates mid-stream arrives as {}), so it is not scorable.
     truncated: bool = False
+    # Content-block shape of every API response this turn took, e.g.
+    # ["thinking,tool_use:scratchpad", "text,tool_use:play"] — the audit trail for how the
+    # player split its output between channels and whether it ever called two tools at once.
+    # Empty on transcripts recorded before the field existed (data/transcripts.jsonl v2).
+    response_signatures: list[str] = Field(default_factory=list)
     assistant_text: str
     tool_call: ToolCallRecord | None
     tool_result: str | None

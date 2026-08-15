@@ -71,15 +71,51 @@ def effort_param(model: str, effort: str) -> dict[str, object]:
     return {}
 
 
+class ToolUse(BaseModel):
+    """One ``tool_use`` block: the id a result must answer, plus the name and arguments."""
+
+    id: str
+    name: str
+    input: dict[str, object]  # tool_use input is schema-free JSON at this boundary
+
+
 class CompletionBlocks(BaseModel):
-    """The pieces of a response the pipeline cares about, flattened from content blocks."""
+    """The pieces of a response the pipeline cares about, flattened from content blocks.
+
+    ``tool_calls`` holds **every** ``tool_use`` block in response order, not just the
+    first: a response may carry several (parallel tool use), and a caller that reads only
+    the first both loses the others' arguments and strands their ids, which the next
+    request rejects. Ask for what you want by name (:meth:`first_call`,
+    :meth:`calls_named`) and answer every id you were given.
+    """
 
     thinking: str
     text: str
-    tool_name: str | None
-    tool_input: dict[str, object]  # tool_use input is schema-free JSON at this boundary
+    tool_calls: list[ToolUse]
     raw_content: list[dict[str, object]]  # verbatim blocks, resent to preserve signatures
     stop_reason: str
+
+    def calls_named(self, name: str) -> list[ToolUse]:
+        """Every ``tool_use`` block for tool ``name``, in response order."""
+        return [call for call in self.tool_calls if call.name == name]
+
+    def first_call(self, name: str) -> ToolUse | None:
+        """The first ``tool_use`` block for tool ``name``, or ``None`` if it was not called."""
+        calls = self.calls_named(name)
+        return calls[0] if calls else None
+
+    @property
+    def block_signature(self) -> str:
+        """The response's content-block shape, e.g. ``thinking,tool_use:scratchpad,tool_use:play``.
+
+        Recorded per response in the transcript so the block combinations the API actually
+        returned are auditable after the fact rather than assumed.
+        """
+        parts = [
+            f"tool_use:{block['name']}" if block["type"] == "tool_use" else str(block["type"])
+            for block in self.raw_content
+        ]
+        return ",".join(parts)
 
 
 def _client() -> anthropic.Anthropic:
@@ -136,24 +172,21 @@ def _wire_block(block: anthropic.types.ContentBlock) -> dict[str, object]:
 
 
 def extract_blocks(message: anthropic.types.Message) -> CompletionBlocks:
-    """Flatten a response into thinking text, visible text, and the first tool call."""
+    """Flatten a response into thinking text, visible text, and every tool call it made."""
     thinking_parts: list[str] = []
     text_parts: list[str] = []
-    tool_name: str | None = None
-    tool_input: dict[str, object] = {}
+    tool_calls: list[ToolUse] = []
     for block in message.content:
         if block.type == "thinking":
             thinking_parts.append(block.thinking)
         elif block.type == "text":
             text_parts.append(block.text)
-        elif block.type == "tool_use" and tool_name is None:
-            tool_name = block.name
-            tool_input = dict(block.input)
+        elif block.type == "tool_use":
+            tool_calls.append(ToolUse(id=block.id, name=block.name, input=dict(block.input)))
     return CompletionBlocks(
         thinking="\n\n".join(thinking_parts),
         text="\n\n".join(text_parts),
-        tool_name=tool_name,
-        tool_input=tool_input,
+        tool_calls=tool_calls,
         raw_content=[_wire_block(block) for block in message.content],
         stop_reason=message.stop_reason or "",
     )
