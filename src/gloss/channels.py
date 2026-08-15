@@ -58,8 +58,16 @@ class ChannelSplit(BaseModel):
     cot_source: str
     n_turns: int
     n_truncated: int
+    # Turns that used at least one channel. The meaningful denominator for the *use* rates, because
+    # a capped-move run is dominated by turns that reason in neither channel: under a per-call cap
+    # the player plans once on turn 0 (an 18k-43k character pad) then emits bare 3-move calls at ~52
+    # output tokens for every remaining turn. Those turns are real but carry nothing to measure, and
+    # dividing by them makes pad use look like 0.06 when it is 1.00 of the turns that reasoned.
+    n_reasoning_turns: int
     mix: dict[str, int]  # ChannelUse -> count; a plain tally, not a validated boundary
     pad_use: Rate
+    # Pad use over reasoning-bearing turns only — the arms' comparable figure.
+    pad_use_given_reasoning: Rate
     # P(native thinking present | pad present) — the relocation test. Relocation predicts ~0.
     co_use_given_pad: Rate
     native_use: Rate
@@ -113,12 +121,15 @@ def split_for(transcripts: list[Transcript], cot_source: str) -> ChannelSplit:
     reported_tokens = [
         turn.native_thinking_tokens for turn in turns if turn.native_thinking_tokens is not None
     ]
+    reasoning_turns = len(turns) - tally["neither"]
     return ChannelSplit(
         cot_source=cot_source,
         n_turns=len(turns),
         n_truncated=len(all_turns) - len(turns),
+        n_reasoning_turns=reasoning_turns,
         mix={use: tally.get(use, 0) for use in ("both", "pad_only", "native_only", "neither")},
         pad_use=Rate.of(tally["both"] + tally["pad_only"], len(turns)),
+        pad_use_given_reasoning=Rate.of(tally["both"] + tally["pad_only"], reasoning_turns),
         co_use_given_pad=Rate.of(tally["both"], len(with_pad)),
         native_use=Rate.of(tally["both"] + tally["native_only"], len(turns)),
         median_pad_chars=_median(
@@ -132,13 +143,14 @@ def split_for(transcripts: list[Transcript], cot_source: str) -> ChannelSplit:
 def render_table(splits: list[ChannelSplit]) -> str:
     """A text table of the arms, headline metric last so it reads as the conclusion."""
     lines = [
-        f"{'arm':20s} {'turns':>5s} {'trunc':>5s}  "
-        f"{'pad use':>22s}  {'native use':>22s}  {'co-use | pad':>22s}",
+        f"{'arm':20s} {'turns':>5s} {'reas':>5s} {'trunc':>5s}  "
+        f"{'pad use | reasoning':>22s}  {'native use':>22s}  {'co-use | pad':>22s}",
     ]
     for split in splits:
         lines.append(
-            f"{split.cot_source:20s} {split.n_turns:5d} {split.n_truncated:5d}  "
-            f"{split.pad_use.render():>22s}  {split.native_use.render():>22s}  "
+            f"{split.cot_source:20s} {split.n_turns:5d} {split.n_reasoning_turns:5d} "
+            f"{split.n_truncated:5d}  "
+            f"{split.pad_use_given_reasoning.render():>22s}  {split.native_use.render():>22s}  "
             f"{split.co_use_given_pad.render():>22s}"
         )
     lines.append("")

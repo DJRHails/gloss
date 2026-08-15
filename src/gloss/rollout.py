@@ -30,10 +30,20 @@ from gloss.wire import (
     TurnRecord,
 )
 
-# 0 means uncapped — the original behaviour, where a strong player submits 30+ moves in one call
-# and wins in two turns, yielding roughly one scorable item per deal. A cap is the cheapest way to
-# raise item yield without swapping in a weaker player (which would change the object of study and
-# make the result a capability artifact rather than a legibility one).
+# 0 means uncapped — the original behaviour, where a strong player submits 30+ moves in one call and
+# wins in two turns.
+#
+# A cap raises the *turn* count but NOT the reasoning-bearing turn count, which is what a
+# legibility measurement needs. Measured on claude-opus-5 at a cap of 3: the player plans the whole
+# line once on turn 0 (an 18k-43k character pad) then emits bare three-move calls at ~52 output
+# tokens with both channels empty for all fifteen remaining turns. Capping *suppresses* re-planning:
+# a short capped batch never invalidates the plan; uncapped runs re-plan when a long batch hits a
+# rejection or completes, so they yield ~2 reasoning turns per deal against the cap's 1.
+#
+# So the cap is the wrong lever for item yield, and more deals is the right one. It is kept because
+# it is still the way to force a long game out of a strong player, and because
+# `gloss channels` reports `n_reasoning_turns` alongside the raw turn count so the dilution is
+# visible rather than silently inflating a denominator.
 MOVES_PER_CALL_UNCAPPED = 0
 
 
