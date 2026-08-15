@@ -69,10 +69,48 @@ uv run gloss rollout --games 1,617,11982   # player transcripts (ground truth + 
 uv run gloss items                         # monitor items, answer keys attached
 uv run gloss monitor                       # both conditions x each monitor model
 uv run gloss score                         # engine-scored summary table
+uv run gloss channels                      # per-arm channel usage (relocation test)
 ```
 
 Every stage checkpoints JSONL under `data/`, so a killed run resumes at the last
-stage boundary.
+stage boundary. Point `--out` somewhere durable for long runs: a ~2.5 hour Opus 5
+rollout set was lost once because it was written inside an ephemeral checkout.
+
+### Item yield, and the knobs that raise it
+
+A strong player is the binding constraint on dataset size, not runtime: `claude-opus-5`
+wins a deal in about two turns by submitting 30+ moves in a single `play` call, and an
+item needs a turn with prior history, so a deal yields roughly one item.
+
+`--max-moves-per-call N` caps moves per call, which multiplies turns — and so items —
+per deal while keeping the strong player. That matters because the alternative, swapping
+in a weaker player, changes the object of study: a legibility result that only holds for
+a weaker model is a capability artifact. The cap is stated in the tool description and
+any overflow is named in the tool result, so the player re-plans from the real state
+instead of silently desynchronising. At `--max-moves-per-call 3`, deals that previously
+ended in two turns run to the 16-turn ceiling.
+
+`--max-output-tokens` defaults to 128k because native thinking, not the pad, is what
+consumes the budget: every truncated turn in the first scratchpad run spent 64k–68k
+characters on thinking before the tool argument began. Turns now record
+`native_thinking_tokens` and `output_tokens`, so the next such diagnosis is data rather
+than reconstruction.
+
+### The two scratchpad wordings
+
+`--cot-source` takes `native`, `scratchpad_urged` or `scratchpad_offered`. Both scratchpad
+arms run the same mechanism with native thinking left on; they differ **only** in wording.
+`scratchpad_urged` asserts the pad is the model's reasoning channel and adds a system
+addendum telling it to think there. `scratchpad_offered` describes the same tool as an
+ordinary optional scratch space, with no addendum. That contrast is the control for the
+relocation reading: a pad instruction forceful enough to *cause* a channel split looks
+identical to one that merely *reveals* it.
+
+`gloss channels` reports the split. Its headline is co-use — P(native thinking present |
+the player wrote a pad) — deliberately conditional, because an arm that simply ignores the
+pad also shows 0% "used both", which would read as relocation while meaning the tool went
+unused. The `native` arm is the null control: the pad tool is never offered there, so pad
+use must come back 0.00.
 
 ## Results (v2 demonstration run, 2026-08-11)
 
