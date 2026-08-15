@@ -33,17 +33,29 @@ PLAY_TOOL_BLOCK = "tool_use:play"
 SUBSTANTIVE_CHARS = 1_000
 
 
+class ChannelSplit(BaseModel):
+    """Turns partitioned by which channels cleared one character threshold."""
+
+    threshold: int  # a channel counts as used at this many characters or more
+    both: int
+    pad_only: int
+    native_only: int
+    neither: int
+
+
 class ChannelCensus(BaseModel):
-    """Per-arm turn counts by which reasoning channel carried content."""
+    """Per-arm turn counts by which reasoning channel carried content.
+
+    Two splits over the same turns: ``any_content`` counts a channel as used at one character
+    (PR #1's tally), ``substantive`` at :data:`SUBSTANTIVE_CHARS`. The pair is the whole point —
+    a turn can look like it used both channels and still have put all of its reasoning in one.
+    """
 
     arm: str
     offers_scratchpad: bool  # a native arm has no pad channel, so "both" is not an estimate there
     num_turns: int
-    both_channels: int
-    both_substantive: int  # both channels over SUBSTANTIVE_CHARS, not a handoff line
-    pad_only: int
-    native_only: int
-    neither: int
+    any_content: ChannelSplit
+    substantive: ChannelSplit
     truncated: int
     mean_pad_chars: float
     mean_native_chars: float
@@ -84,6 +96,18 @@ def _group_by_arm(transcripts: list[Transcript]) -> dict[str, list[Transcript]]:
     return dict(sorted(groups.items()))
 
 
+def _split(chars: list[tuple[int, int]], *, threshold: int) -> ChannelSplit:
+    """Partition ``(pad, native)`` character pairs by which channels reach ``threshold``."""
+    used = [(pad >= threshold, native >= threshold) for pad, native in chars]
+    return ChannelSplit(
+        threshold=threshold,
+        both=sum(1 for pad, native in used if pad and native),
+        pad_only=sum(1 for pad, native in used if pad and not native),
+        native_only=sum(1 for pad, native in used if native and not pad),
+        neither=sum(1 for pad, native in used if not pad and not native),
+    )
+
+
 def channel_census(transcripts: list[Transcript]) -> list[ChannelCensus]:
     """One :class:`ChannelCensus` per arm, over every recorded turn.
 
@@ -97,22 +121,14 @@ def channel_census(transcripts: list[Transcript]) -> list[ChannelCensus]:
         chars = [_channel_chars(transcript, turn) for transcript, turn in turns]
         pads = [pad for pad, _native in chars]
         natives = [native for _pad, native in chars]
-        used = [(pad > 0, native > 0) for pad, native in chars]
         count = len(turns) or 1  # means over an empty arm are 0.0, not a ZeroDivisionError
         censuses.append(
             ChannelCensus(
                 arm=arm,
                 offers_scratchpad=any(t.cot_source != "native" for t in group),
                 num_turns=len(turns),
-                both_channels=sum(1 for pad, native in used if pad and native),
-                both_substantive=sum(
-                    1
-                    for pad, native in chars
-                    if pad >= SUBSTANTIVE_CHARS and native >= SUBSTANTIVE_CHARS
-                ),
-                pad_only=sum(1 for pad, native in used if pad and not native),
-                native_only=sum(1 for pad, native in used if native and not pad),
-                neither=sum(1 for pad, native in used if not pad and not native),
+                any_content=_split(chars, threshold=1),
+                substantive=_split(chars, threshold=SUBSTANTIVE_CHARS),
                 truncated=sum(1 for _transcript, turn in turns if turn.truncated),
                 mean_pad_chars=sum(pads) / count,
                 mean_native_chars=sum(natives) / count,
@@ -150,23 +166,24 @@ def response_census(transcripts: list[Transcript]) -> list[ResponseCensus]:
 def channel_table(censuses: list[ChannelCensus]) -> str:
     """Markdown table of the four-way channel split, with a Wilson interval on "both"."""
     header = (
-        f"| arm | turns | both channels | both over {SUBSTANTIVE_CHARS} chars | pad only "
-        "| native only | neither | truncated | mean pad chars | mean native chars |\n"
+        "| arm | turns | a channel counts as used at | both channels | pad only | native only "
+        "| neither | truncated | mean pad chars | mean native chars |\n"
         "|---|---|---|---|---|---|---|---|---|---|"
     )
     rows: list[str] = []
     for census in censuses:
-        both = (
-            f"{rate_with_ci(census.both_channels, census.num_turns)} "
-            f"| {rate_with_ci(census.both_substantive, census.num_turns)}"
-            if census.offers_scratchpad
-            else "n/a (no pad offered) | n/a"
-        )
-        rows.append(
-            f"| {census.arm} | {census.num_turns} | {both} "
-            f"| {census.pad_only} | {census.native_only} | {census.neither} | {census.truncated} "
-            f"| {census.mean_pad_chars:,.0f} | {census.mean_native_chars:,.0f} |"
-        )
+        for split in (census.any_content, census.substantive):
+            both = (
+                rate_with_ci(split.both, census.num_turns)
+                if census.offers_scratchpad
+                else "n/a (no pad offered)"
+            )
+            label = "1 char" if split.threshold == 1 else f"{split.threshold:,} chars"
+            rows.append(
+                f"| {census.arm} | {census.num_turns} | {label} | {both} "
+                f"| {split.pad_only} | {split.native_only} | {split.neither} | {census.truncated} "
+                f"| {census.mean_pad_chars:,.0f} | {census.mean_native_chars:,.0f} |"
+            )
     return "\n".join([header, *rows])
 
 
