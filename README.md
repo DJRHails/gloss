@@ -153,6 +153,49 @@ summarized thinking (the API never returns the raw CoT); and an Opus-tier monito
 is a flag away (`--monitor-models claude-opus-5,...`) but was skipped here for
 rate-limit reasons.
 
+## Results (channel-split wording control, 2026-08-15)
+
+**The relocation reading does not replicate, including in its own arm.** The scratchpad-CoT PR
+reported that across 19 Opus 5 turns *zero* used both channels — where the model wrote a pad it did
+no native thinking, and vice versa — and read that as the pad *relocating* reasoning rather than
+revealing it. Re-run with a 128k output budget and no move cap, on `claude-opus-5` at `medium`
+effort over 12 deals:
+
+| arm | reasoning turns | pad use (of reasoning turns) | co-use given a pad |
+| --- | --- | --- | --- |
+| `scratchpad_urged` | 32 | 0.62 [0.45, 0.77] 20/32 | **0.40 [0.22, 0.61] 8/20** |
+| `scratchpad_offered` | 17 | 0.24 [0.10, 0.47] 4/17 | 0.75 [0.30, 0.95] 3/4 |
+
+95% Wilson. Same forceful wording as the original, and 8 of 20 pad-writing turns *also* did native
+thinking. "Zero of 19" was not a stable property of the mechanism.
+
+**The wording does something real, but it is not exclusivity.** It changes pad *uptake* sharply —
+0.62 of reasoning turns write a pad when urged, 0.24 when the same tool is merely offered — which is
+what makes the control a working manipulation rather than a null edit. What it does not do is create
+an exclusive split: co-use given a pad is nowhere near zero under either wording. So there is no
+relocation to attribute to the prompt, because there is no exclusivity to explain.
+
+**The original zero is best explained by the output budget, not by the model.** Four `urged` turns
+here truncated, and every one shows the same signature: native thinking consumed the *entire* 128k
+budget (131k–137k characters) with the pad arriving empty. Such a turn presents as native-only. At
+the original run's 32k and 64k budgets that failure would be far more frequent, systematically
+converting would-be both-channel turns into native-only ones and driving co-use toward zero.
+
+Which also means **raising the output budget is not the fix**: thinking expands to fill whatever it
+is given (64k–68k characters at a 64k budget, 131k–137k at 128k). `--thinking-budget` is a no-op on
+adaptive models — `thinking_param` returns `{"type": "adaptive"}` and depth is set by
+`output_config.effort` — so the actual lever is `--effort`, and that is what a future run should turn
+down.
+
+Caveats. The `offered` arm's co-use rests on only 4 pad-writing turns, because low uptake is exactly
+what the weak wording produces; its interval [0.30, 0.95] excludes nothing useful, and the
+load-bearing refutation is the `urged` arm at n=20, which is the same condition the original claim
+was made in. One model, one task, `medium` effort throughout. Truncated turns are excluded rather
+than scored, so the rates describe turns the harness could actually read.
+
+Provenance: `.data/gloss-powered/channel-split.jsonl` on the touchstone side, regenerated with
+`gloss channels`. The run was still completing its last deals when these numbers were taken.
+
 ## Repo notes
 
 Structured after [DJRHails/touchstone](https://github.com/DJRHails/touchstone)
