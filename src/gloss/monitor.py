@@ -172,9 +172,10 @@ def run_monitor(
             **interleaved_thinking_param(monitor_model),
         )
         blocks = extract_blocks(message)
-        if blocks.tool_name == "submit_reconstruction":
+        submission = blocks.first_call("submit_reconstruction")
+        if submission is not None:
             try:
-                answer = MonitorAnswer.model_validate(blocks.tool_input)
+                answer = MonitorAnswer.model_validate(submission.input)
             except pydantic.ValidationError as exc:
                 return MonitorRun(
                     item_id=item.item_id,

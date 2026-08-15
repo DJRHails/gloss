@@ -14,6 +14,7 @@ from typing import Annotated
 import typer
 from loguru import logger
 
+from gloss.channels import channel_census, channel_table, response_census, response_table
 from gloss.freecell import deal as ms_deal
 from gloss.monitor import build_items, run_monitor, swapped_cot_donors
 from gloss.rollout import run_rollout
@@ -89,6 +90,22 @@ def rollout(
     transcripts.sort(key=lambda transcript: transcript.transcript_id)
     write_jsonl(transcripts, out, atomic=True)
     typer.echo(f"{len(transcripts)} transcripts -> {out}")
+
+
+@app.command()
+def channels(
+    transcripts: Annotated[Path, typer.Option()] = Path("data/transcripts.jsonl"),
+) -> None:
+    """Audit recorded transcripts: which reasoning channel each turn used, and block shapes.
+
+    Two tables, both engine-free bookkeeping over the transcript: the four-way channel split
+    per arm (the "both channels" count is the scratchpad relocation question), and the census
+    of content-block signatures the API returned, including multi-tool responses.
+    """
+    rows = read_jsonl_rows(transcripts, Transcript)
+    typer.echo(channel_table(channel_census(rows)))
+    typer.echo()
+    typer.echo(response_table(response_census(rows)))
 
 
 @app.command()
