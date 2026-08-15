@@ -115,3 +115,19 @@ def test_arm_yield_and_statement_name_the_dominant_loss() -> None:
     statement = yield_statement(summary)
     assert "2 deals (4 turns) yield 2 items" in statement
     assert "no-prior-history" in statement and "2 of 2 excluded turns" in statement
+
+
+def test_substantive_items_and_front_loading_are_reported() -> None:
+    """An item whose CoT is one line counts as an item but not as a usable trace."""
+    turns = [
+        turn(0, thinking="X" * 20_000),  # the big think, structurally excluded
+        turn(1, thinking="Let me play those moves."),  # an item, but nothing to reconstruct
+        turn(2, thinking="Y" * 1_500),  # a usable item
+    ]
+    census = transcript_yield(transcript(turns))
+    assert (census.num_items, census.substantive_items) == (2, 1)
+    assert census.cot_chars_first_turn == 20_000
+    assert census.cot_chars_later_turns == (len("Let me play those moves.") + 1_500) / 2
+    summary = arm_yields([transcript(turns)])[0]
+    assert (summary.items_per_deal, summary.substantive_per_deal) == (2.0, 1.0)
+    assert "1 carries a CoT of 1000+ chars" in yield_statement(summary)

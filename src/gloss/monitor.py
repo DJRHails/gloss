@@ -173,6 +173,12 @@ class MovesPerCall(BaseModel):
     buckets: dict[str, int]  # label -> calls, over MOVE_COUNT_BUCKETS
 
 
+# A CoT column shorter than this is a handoff line ("Let me play those moves"), not a trace to
+# reconstruct anything from. An item built on one counts toward `num_items` but carries nothing
+# for the monitor to be legible about, so yield is reported both ways.
+SUBSTANTIVE_COT_CHARS = 1_000
+
+
 class TranscriptYield(BaseModel):
     """One transcript's item yield and the reason every non-yielding turn was excluded."""
 
@@ -182,7 +188,10 @@ class TranscriptYield(BaseModel):
     won: bool
     num_turns: int
     num_items: int
+    substantive_items: int  # items whose CoT is at least SUBSTANTIVE_COT_CHARS long
     excluded: dict[str, int]  # ItemExclusion label -> turns, always all four keys
+    cot_chars_first_turn: float  # mean CoT length on turn 0, which never yields an item
+    cot_chars_later_turns: float  # mean CoT length on the turns that can
     moves_per_call: MovesPerCall
 
 
@@ -193,8 +202,12 @@ class ArmYield(BaseModel):
     num_deals: int
     num_turns: int
     num_items: int
+    substantive_items: int
     items_per_deal: float
+    substantive_per_deal: float
     excluded: dict[str, int]
+    cot_chars_first_turn: float
+    cot_chars_later_turns: float
     moves_per_call: MovesPerCall
 
 
@@ -230,16 +243,31 @@ def _exclusion_counts(turns: list[TurnRecord], *, min_turn: int) -> dict[str, in
     return counts
 
 
+def _mean_cot_chars(turns: list[TurnRecord]) -> float:
+    """Mean CoT-column length over ``turns``; 0.0 over an empty list."""
+    if not turns:
+        return 0.0
+    return sum(len(turn.thinking.strip()) for turn in turns) / len(turns)
+
+
+def _substantive_items(items: list[MonitorItem]) -> int:
+    return sum(1 for item in items if len(item.cot.strip()) >= SUBSTANTIVE_COT_CHARS)
+
+
 def transcript_yield(transcript: Transcript, *, min_turn: int = 1) -> TranscriptYield:
-    """Per-deal yield: turns in, items out, and where the rest went."""
+    """Per-deal yield: turns in, items out, where the rest went, and how long the CoTs are."""
+    items = build_items(transcript, min_turn=min_turn)
     return TranscriptYield(
         transcript_id=transcript.transcript_id,
         game_num=transcript.game_num,
         arm=f"{transcript.agent_model} / {transcript.cot_source}",
         won=transcript.won,
         num_turns=len(transcript.turns),
-        num_items=len(build_items(transcript, min_turn=min_turn)),
+        num_items=len(items),
+        substantive_items=_substantive_items(items),
         excluded=_exclusion_counts(transcript.turns, min_turn=min_turn),
+        cot_chars_first_turn=_mean_cot_chars(transcript.turns[:min_turn]),
+        cot_chars_later_turns=_mean_cot_chars(transcript.turns[min_turn:]),
         moves_per_call=moves_per_call(transcript.turns),
     )
 
@@ -254,15 +282,26 @@ def arm_yields(transcripts: list[Transcript], *, min_turn: int = 1) -> list[ArmY
     summaries: list[ArmYield] = []
     for arm, group in sorted(groups.items()):
         turns = [turn for transcript in group for turn in transcript.turns]
-        items = sum(len(build_items(transcript, min_turn=min_turn)) for transcript in group)
+        items = [
+            item for transcript in group for item in build_items(transcript, min_turn=min_turn)
+        ]
+        substantive = _substantive_items(items)
         summaries.append(
             ArmYield(
                 arm=arm,
                 num_deals=len(group),
                 num_turns=len(turns),
-                num_items=items,
-                items_per_deal=items / len(group),
+                num_items=len(items),
+                substantive_items=substantive,
+                items_per_deal=len(items) / len(group),
+                substantive_per_deal=substantive / len(group),
                 excluded=_exclusion_counts(turns, min_turn=min_turn),
+                cot_chars_first_turn=_mean_cot_chars(
+                    [turn for transcript in group for turn in transcript.turns[:min_turn]]
+                ),
+                cot_chars_later_turns=_mean_cot_chars(
+                    [turn for transcript in group for turn in transcript.turns[min_turn:]]
+                ),
                 moves_per_call=moves_per_call(turns),
             )
         )
@@ -283,7 +322,8 @@ def _moves_columns(moves: MovesPerCall) -> str:
 def _yield_header(first_column: str, unit_columns: str) -> str:
     reasons = " | ".join(get_args(ItemExclusion))
     header = (
-        f"| {first_column} | {unit_columns} | items | {reasons} "
+        f"| {first_column} | {unit_columns} | items | items with a real CoT | {reasons} "
+        "| CoT chars turn 0 | CoT chars later turns "
         "| moves/call mean | median | max | moves/call distribution |"
     )
     return f"{header}\n|{'---|' * (header.count('|') - 1)}"
@@ -294,7 +334,8 @@ def deal_yield_table(yields: list[TranscriptYield]) -> str:
     rows = [
         f"| {row.transcript_id} | {row.arm} | {row.num_turns} "
         f"| {'won' if row.won else 'unfinished'} "
-        f"| {row.num_items} | {_excluded_columns(row.excluded)} "
+        f"| {row.num_items} | {row.substantive_items} | {_excluded_columns(row.excluded)} "
+        f"| {row.cot_chars_first_turn:,.0f} | {row.cot_chars_later_turns:,.0f} "
         f"| {_moves_columns(row.moves_per_call)} |"
         for row in yields
     ]
@@ -305,11 +346,15 @@ def arm_yield_table(yields: list[ArmYield]) -> str:
     """Markdown table of per-arm yield, pooled over that arm's deals."""
     rows = [
         f"| {row.arm} | {row.num_deals} | {row.num_turns} | {row.items_per_deal:.2f} "
-        f"| {row.num_items} | {_excluded_columns(row.excluded)} "
+        f"| {row.substantive_per_deal:.2f} | {row.num_items} | {row.substantive_items} "
+        f"| {_excluded_columns(row.excluded)} "
+        f"| {row.cot_chars_first_turn:,.0f} | {row.cot_chars_later_turns:,.0f} "
         f"| {_moves_columns(row.moves_per_call)} |"
         for row in yields
     ]
-    return "\n".join([_yield_header("arm", "deals | turns | items/deal"), *rows])
+    return "\n".join(
+        [_yield_header("arm", "deals | turns | items/deal | real-CoT items/deal"), *rows]
+    )
 
 
 def yield_statement(summary: ArmYield) -> str:
@@ -325,9 +370,13 @@ def yield_statement(summary: ArmYield) -> str:
     )
     return (
         f"{summary.arm}: {summary.num_deals} deals ({summary.num_turns} turns) yield "
-        f"{summary.num_items} item{'' if summary.num_items == 1 else 's'} — "
-        f"{summary.items_per_deal:.2f} per deal; {tail}, and "
-        f"`play` calls carry a median of {summary.moves_per_call.median:.0f} moves "
+        f"{summary.num_items} item{'' if summary.num_items == 1 else 's'} "
+        f"({summary.items_per_deal:.2f}/deal), of which {summary.substantive_items} "
+        f"{'carries' if summary.substantive_items == 1 else 'carry'} a CoT "
+        f"of {SUBSTANTIVE_COT_CHARS}+ chars ({summary.substantive_per_deal:.2f}/deal); {tail}. "
+        f"Turn 0 averages {summary.cot_chars_first_turn:,.0f} CoT chars against "
+        f"{summary.cot_chars_later_turns:,.0f} on the turns that can yield items, and `play` "
+        f"calls carry a median of {summary.moves_per_call.median:.0f} moves "
         f"(max {summary.moves_per_call.maximum})."
     )
 
