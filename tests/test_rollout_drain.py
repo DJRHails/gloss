@@ -9,7 +9,7 @@ model was handed comes back with a ``tool_result``.
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from anthropic.types import Message, TextBlock, ThinkingBlock, ToolUseBlock, Usage
@@ -29,7 +29,10 @@ def play_block(id_: str, moves: str = LEGAL_OPENING) -> ToolUseBlock:
     return ToolUseBlock(id=id_, name="play", input={"moves": moves}, type="tool_use")
 
 
-def message(content: list[Any], stop_reason: str = "tool_use") -> Message:
+StopReason = Literal["end_turn", "max_tokens", "tool_use"]
+
+
+def message(content: list[Any], stop_reason: StopReason = "tool_use") -> Message:
     return Message(
         id="msg_test",
         content=content,
