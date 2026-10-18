@@ -359,6 +359,11 @@ other models, on later turns, and on legibility]
   thinking.
 - **Self-monitoring.** `claude-sonnet-5` monitors 7 items that `claude-sonnet-5` played. Nothing
   splits those out, so own-trace familiarity is not ruled out.
+- **Few distinct placebo traces.** The 26 `swapped-cot` items draw on only 5 distinct donor
+  traces (9, 9, 4, 3 and 1 items each), because every item in a transcript takes the same
+  next-transcript donor. The swapped-cot contrasts therefore partly reflect how those 5 traces
+  mislead, and the McNemar p-values, which treat items as independent, likely overstate the
+  evidence.
 - **Direction versus magnitude.** For "a wrong-game trace misleads Sonnet 5" the uncertainty is
   mostly about *magnitude*. For "the real CoT adds signal beyond the history" and "the real
   CoT hurts state reconstruction", the *direction* itself is uncertain at this n.
