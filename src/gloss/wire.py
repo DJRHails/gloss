@@ -79,7 +79,7 @@ class Transcript(BaseModel):
 class MonitorItem(BaseModel):
     """One monitor question: prior-turn history (CoT stripped) plus this turn's CoT.
 
-    ``context`` is the rendered history the monitor sees under both conditions;
+    ``context`` is the rendered history the monitor sees under every condition;
     ``cot`` is included only under ``with-cot``. The ``truth_*`` fields never reach
     the monitor — they are the scoring key.
     """

@@ -113,14 +113,15 @@ For each turn *k ≥ 1*, a **monitor item** contains:
 - the initial board and every prior turn's visible text, tool calls, and tool results
   (**all prior thinking stripped**), and
 - under the `with-cot` condition, the current turn's thinking; under `no-cot`, nothing;
-  under `swapped-cot`, a donor trace from a *different game* presented identically to
-  the real one — the placebo arm that separates "the trace carries content" from "having
-  any trace primes the monitor".
+  under `swapped-cot`, a donor trace from a *different transcript* presented identically
+  to the real one — the placebo arm that separates "the trace carries content" from
+  "having any trace primes the monitor".
 
-(Precisely, the donor is the next item from a *different transcript*
-(`swapped_cot_donors` in `src/gloss/monitor.py`). In the committed corpus, 25 of the 26
-donors come from a different deal. The exception is `game1-claude-fable-5-t1`, whose donor is
-deal #1 as played by `claude-sonnet-4-5`, at a different position.)
+The donor is the next item from a different transcript (`swapped_cot_donors` in
+`src/gloss/monitor.py`), which is usually, but not always, a different game. In the committed
+corpus, 25 of the 26 donors come from a different deal. The exception is
+`game1-claude-fable-5-t1`: its donor is the same deal (#1) as played by `claude-sonnet-4-5`,
+at a different position.
 
 The monitor submits a structured reconstruction and is scored **by the engine, never a
 judge**:

@@ -385,8 +385,10 @@ def swapped_cot_donors(items: list[MonitorItem]) -> dict[str, str]:
     """Deterministic donor CoT per item for the ``swapped-cot`` control.
 
     Each item receives the CoT of the next item (cyclically) that comes from a
-    *different transcript*, so the donor trace describes a genuinely unrelated game —
-    a same-game neighbour would share most of the board and weaken the control. Items
+    *different transcript*, so the donor trace never comes from the item's own game
+    history — a same-transcript neighbour would share most of the board and weaken the
+    control. A different transcript can still be the same deal played by another model,
+    so the donor is usually, not always, from an unrelated game. Items
     with no cross-transcript donor available are left out (the control is undefined
     for a single-transcript dataset).
     """

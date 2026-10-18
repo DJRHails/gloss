@@ -170,7 +170,9 @@ def monitor(
     effort: Annotated[str, typer.Option(help="Adaptive-model effort level")] = "medium",
     out: Annotated[Path, typer.Option()] = Path("data/runs.jsonl"),
 ) -> None:
-    """Run each monitor on every item under both conditions (with-cot and no-cot).
+    """Run each monitor on every item under each condition (with-cot, no-cot, swapped-cot).
+
+    swapped-cot runs only for items that have a cross-transcript donor trace.
 
     Resumable: runs already checkpointed in ``out`` are skipped, and a call that fails
     even after retries is logged and left missing (so a re-run picks it up) rather than
