@@ -9,79 +9,42 @@ gloss asks whether a monitor can reconstruct a FreeCell player's game state, its
 lines, and its next move from the player's chain of thought (CoT), and how much the CoT adds
 over the action history alone. It exists because the Claude Fable 5 / Mythos 5 system card
 called a FreeCell trace illegible, and the debate that followed had no objective way to settle
-"I can read this" claims ([where this comes from](#where-this-comes-from)). **Status: active
-research prototype.** The instrument is built and tested, and one small demonstration run
-(26 items, 2026-08-11) is committed under `data/`. Follow-up work in August 2026 added and
-debugged scratchpad arms and measured why the item count stays small. Nothing here is a
-powered finding yet.
+"I can read this" claims ([where this comes from](#where-this-comes-from)).
 
-## Key takeaways
+**Status: research prototype.** The instrument is built and tested, and one small
+demonstration run (26 items) is committed under `data/`. Nothing here is a powered finding yet.
 
-- **The instrument works and the committed results reproduce offline.** 52 tests pass (engine,
-  scoring invariants, item yield, rollout drain, scratchpad arms), and `gloss items && gloss
-  score` re-derives `data/items.jsonl` and `data/scores.json` byte-for-byte from the committed
-  transcripts. [confidence: ~95%; re-run in this audit]
+## Summary of results so far
+
+- **The committed results reproduce offline.** `gloss items && gloss score` re-derive
+  `data/items.jsonl` and `data/scores.json` byte-for-byte from the committed transcripts and
+  monitor runs, with no API key.
   → [Reproducing the committed results](#reproducing-the-committed-results)
-- **A wrong-game trace misleads Sonnet 5, and this is the clearest effect in the data.** It
-  predicts the player's next first move 3/26 times with a swapped trace and 15/26 with the real
-  one (13 vs 1 discordant items, exact McNemar p = 0.002). The swapped trace is also worse than
-  no trace (12% vs 42%, p = 0.02). Haiku 4.5 shows no significant swapped-cot effect.
-  [confidence: ~80% that the direction holds beyond this corpus; magnitude unstable]
+- **A wrong-game trace misleads Sonnet 5; this is the clearest effect in the data.** It predicts
+  the player's next first move 3/26 times with a swapped trace and 15/26 with the real one (13
+  vs 1 discordant items, exact McNemar p = 0.002), and the swapped trace is also worse than no
+  trace (12% vs 42%, p = 0.02). The direction is likely to hold beyond this corpus, but the
+  magnitude is unstable: the placebo draws on only 5 distinct donor traces. Haiku 4.5 shows no
+  significant swapped-cot effect.
   → [Results](#results-v2-demonstration-run-2026-08-11)
 - **The headline legibility measure (with-CoT minus no-CoT) is positive but not significant at
   n = 26.** Next first move goes from 42% to 58% for Sonnet 5 (p = 0.29) and from 12% to 31% for
-  Haiku 4.5 (p = 0.18). [confidence that a real positive delta exists: ~65%]
+  Haiku 4.5 (p = 0.18), so even the direction is uncertain.
   → [Statistical reading](#statistical-reading-of-the-v2-table)
-- **The real CoT may *lower* state reconstruction, but that is not established.** Sonnet 5 gets
+- **The real CoT may lower state reconstruction, but that is not established.** Sonnet 5 gets
   96% of states exactly right without the CoT and 81% with it (5 vs 1 discordant items,
-  p = 0.22, ns). [confidence: ~50%] → [Results](#results-v2-demonstration-run-2026-08-11)
+  p = 0.22). → [Results](#results-v2-demonstration-run-2026-08-11)
 - **The corpus barely tests the motivating trace.** Only 1 of the 26 items comes from the
   `claude-fable-5` player that stands in for the system card's Mythos trace. 18 come from
   `claude-sonnet-4-5`, and 9 of those have a CoT under 1,000 characters. Item yield is the
   binding constraint: frontier players plan the whole game in turn 0, which can't become an
-  item. [confidence: ~95%; counted from `data/items.jsonl` and the `gloss items` yield report]
-  → [Item yield](#item-yield)
+  item. → [Item yield](#item-yield)
 - **A scratchpad tool moves reasoning to a different channel; it doesn't reveal reasoning that
-  was hidden.** On `claude-opus-5` turn 0, 0 of 40 turns under either scratchpad wording put
+  was hidden.** On `claude-opus-5` turn 0, none of 40 turns under either scratchpad wording put
   1,000+ characters in both the pad and native thinking (95% Wilson upper bound 9%). The
   wording decides which channel wins. Whether the pad is *legible* has not been scored. These
-  transcripts were not committed. [confidence: ~75%; from PR #5's write-up, not re-derivable
-  from the repo] → [Scratchpad arms](#scratchpad-arms-the-neuralese-leaker-mechanism)
-
-**How to read this.** Confidence tags are an assessment of the evidence in this repo (sample
-sizes, seeds, intervals), added in a 2026-10 README audit; they are not new measurements. The
-Wilson intervals and paired McNemar p-values in the takeaways and the
-[statistical reading](#statistical-reading-of-the-v2-table) were computed in that audit from
-the per-item rows already in `data/scores.json`. No model was called. Those p-values are
-optimistic: they treat the 26 items as independent, but the items come from 6 transcripts and
-4 deals. They are also uncorrected for the 18 comparisons in that table.
-
-**What the conclusions rest on.** Three things carry the weight:
-
-1. **The engine** (`src/gloss/freecell.py`). Every score is settled by replaying the monitor's
-   answer, so a rules bug would corrupt every column. `tests/test_freecell.py` checks it against
-   the canonical Microsoft deals #1 and #617 and the move rules.
-2. **The `swapped-cot` placebo.** It is the only contrast that separates "this trace carries
-   content" from "any trace primes the monitor", and it is the only contrast that reaches
-   p < 0.05 in this corpus.
-3. **Item composition.** Who played the turns decides what the numbers are about, and at present
-   that is mostly `claude-sonnet-4-5`.
-
-## Contents
-
-- [Where this comes from](#where-this-comes-from)
-- [Design](#design)
-  - [Where the CoT column comes from](#where-the-cot-column-comes-from)
-- [Running it](#running-it)
-  - [Reproducing the committed results](#reproducing-the-committed-results)
-- [Results (v2 demonstration run, 2026-08-11)](#results-v2-demonstration-run-2026-08-11)
-  - [Statistical reading of the v2 table](#statistical-reading-of-the-v2-table)
-- [Follow-up measurements (August 2026)](#follow-up-measurements-august-2026)
-  - [Item yield](#item-yield)
-  - [Scratchpad arms: the neuralese-leaker mechanism](#scratchpad-arms-the-neuralese-leaker-mechanism)
-- [Scope and limitations](#scope-and-limitations)
-- [Provenance and research process](#provenance-and-research-process)
-- [Repo notes](#repo-notes)
+  numbers are quoted from PR #5; its transcripts are not committed.
+  → [Scratchpad arms](#scratchpad-arms-the-neuralese-leaker-mechanism)
 
 ## Where this comes from
 
@@ -191,7 +154,7 @@ stages. Defaults worth knowing: player `claude-fable-5`, `--max-turns 24`,
 below used 64000). Monitors default to `claude-sonnet-5,claude-haiku-4-5-20251001` with a
 4000-token thinking budget. The API exposes no sampling seed, so a re-run is a fresh draw.
 
-Development checks, which must all pass before a commit (see `CLAUDE.md`):
+Development checks, which must all pass before a commit (see `AGENTS.md`):
 
 ```sh
 uv run pytest
@@ -211,9 +174,6 @@ uv run gloss score    # rescores data/runs.jsonl -> data/scores.json and prints 
 git status            # expect a clean tree: both files are regenerated byte-identically
 ```
 
-Checked in the 2026-10 audit: the tree stayed clean and the printed table matched the one
-below.
-
 ## Results (v2 demonstration run, 2026-08-11)
 
 <!-- data-source: data/scores.json (summaries); regenerate with `uv run gloss score` -->
@@ -224,8 +184,8 @@ playing MS deals #1, #617, #164, and #3358 under `ack` feedback — 26 items, in
 mid-game positions from two games Sonnet 5 won outright (96 and 108 applied moves).
 Of the 26 items, 1 is from `claude-fable-5` (deal #1), 18 from `claude-sonnet-4-5` (deals #1
 and #617) and 7 from `claude-sonnet-5` (deals #164 and #3358).
-Monitors ran all three conditions at `medium` effort. Engine-scored, no judge anywhere.
-`claude-haiku-4-5` below is `claude-haiku-4-5-20251001`:
+Monitors ran all three conditions at `medium` effort, one sample per item. Engine-scored, no
+judge anywhere. `claude-haiku-4-5` below is `claude-haiku-4-5-20251001`:
 
 | monitor | condition | n | state exact | card loc | next-call exact | next 1st move | line legal | line 1st-move hit |
 |---|---|---|---|---|---|---|---|---|
@@ -243,44 +203,44 @@ Patterns worth pre-registering attention on (n = 26 — a demonstration, not fin
   with-cot **58%**. A trace from the wrong game is *worse than no trace* — the monitor
   reads it and follows it into the wall — so the with-CoT gain cannot be generic
   priming. Haiku shows the same ordering, attenuated (12% / 15% / 31%).
-  *Audit note:* for Sonnet, the swapped-versus-real and swapped-versus-none contrasts are
-  significant (p = 0.002 and p = 0.02). The with-versus-none gain is not (p = 0.29), so "the
-  CoT carries signal beyond the action history" is suggestive, not shown. For Haiku none of
-  these contrasts is significant (p ≥ 0.18). [confidence: ~80% that a wrong trace actively
-  misleads Sonnet 5; ~65% that the real trace adds signal beyond the history]
+  For Sonnet, the swapped-versus-real and swapped-versus-none contrasts are significant
+  (p = 0.002 and p = 0.02). The with-versus-none gain is not (p = 0.29), so "the CoT carries
+  signal beyond the action history" is suggestive, not shown. For Haiku none of these
+  contrasts is significant (p ≥ 0.18).
 - **The CoT can mislead on state, but only when it's plausible.** Sonnet reconstructs
   the prior state near-perfectly by simulating the tool-call history (no-cot 96%),
   drops to 81% trusting the *real* CoT (the player's own state-tracking errors live in
   its reasoning), yet scores 100% under swapped-cot — an obviously-inconsistent trace
   gets ignored, a plausible one gets believed. "Legible" and "faithful to the board"
   are different properties, and the benchmark separates them.
-  *Audit note:* the 96% → 81% drop is 5 items against 1 (p = 0.22) and the 81% → 100% gap
-  is 5 against 0 (p = 0.06). Neither is significant, and the explanation in this bullet has
-  not been checked item by item against the player's CoT. [confidence: ~50%]
+  Treat this one as a hypothesis: the 96% → 81% drop is 5 items against 1 (p = 0.22), the
+  81% → 100% gap is 5 against 0 (p = 0.06), and the explanation has not been checked item by
+  item against the player's CoT.
 - **Line legality is bounded by the player, not just the monitor.** Lines faithfully
   extracted from a confused CoT are themselves illegal (the v1 agents submitted many
   rejected moves), and lines from a swapped trace barely replay at all (49% → 19%
   under swapped for Sonnet). Read this column jointly with the player's own rejection
   rate.
-  *Audit note:* the v1 transcripts were replaced by v2 (commit `3e715ac`), so the v1
-  rejection claim can't be checked against committed data. Line legality is a rate over
-  submitted lines, not over items, so its denominator varies by arm (`mean_lines_per_item`
-  in `data/scores.json` ranges from 1.65 to 3.58). [confidence: ~60%; plausible mechanism,
-  not tested]
+  The v1 transcripts were replaced by v2 and not kept, so the v1 rejection claim can't be
+  checked against committed data. Line legality is a rate over submitted lines, not over
+  items, so its denominator varies by arm (`mean_lines_per_item` in `data/scores.json` ranges
+  from 1.65 to 3.58).
 
-Remaining v3 caveats: n is still small (no CIs yet); the Fable/Mythos arm plays through
+Remaining v3 caveats: n is still small (intervals below); the Fable/Mythos arm plays through
 summarized thinking (the API never returns the raw CoT); and an Opus-tier monitor arm
 is a flag away (`--monitor-models claude-opus-5,...`) but was skipped here for
 rate-limit reasons.
 
 ### Statistical reading of the v2 table
 
-<!-- generated-by: 2026-10 README audit, exact binomial McNemar and Wilson 95% intervals over
-data/scores.json per_item; errored or unanswered runs count as misses, as in the summaries -->
-
 Wilson 95% intervals on the three binary item-level metrics, with exact McNemar p-values for
-the paired contrasts (the same 26 items in every condition). Item clustering and multiple
-comparisons are not corrected for; see [how to read this](#key-takeaways).
+the paired contrasts (the same 26 items in every condition). These are computed from the
+per-item rows in `data/scores.json`, counting errored or unanswered runs as misses, as the
+summary table does.
+
+The p-values are optimistic. They treat the 26 items as independent, but the items come from
+5 transcripts and 4 deals, and the 26 `swapped-cot` items share 5 donor traces. They are also
+uncorrected for the 18 comparisons in the table.
 
 | monitor | metric | no-cot | swapped-cot | with-cot | with vs no | swapped vs no | with vs swapped |
 |---|---|---|---|---|---|---|---|
@@ -295,18 +255,18 @@ comparisons are not corrected for; see [how to read this](#key-takeaways).
 the second got right. Bold cells are p < 0.05 before any correction. With 18 tests, about one
 would reach p < 0.05 by chance. The four bold Sonnet cells are all swapped-cot contrasts.
 
-## Follow-up measurements (August 2026)
+## Follow-up measurements
 
-These came from PRs #1, #2, #4 and #5, merged 2026-08-13 to 2026-08-15. Their transcripts were
-written under `.data/`, which is gitignored, and **are not committed**. The numbers below are
-quoted from those PRs' write-ups and squash-commit messages, and can't be re-derived from this
-repo. None of them changes the v2 table: `data/transcripts.jsonl` is native-arm only.
+These came from PRs #1, #2, #4 and #5. Their transcripts were written under `.data/`, which is
+gitignored, and **are not committed**. The numbers below are quoted from those PRs' write-ups
+and squash-commit messages, and can't be re-derived from this repo. None of them changes the
+v2 table: `data/transcripts.jsonl` is native-arm only.
 
 ### Item yield
 
-`gloss items` now reports, for every build, how many turns become items and why the rest are
+`gloss items` reports, for every build, how many turns become items and why the rest are
 excluded. `item_exclusion` in `src/gloss/monitor.py` is the single definition of eligibility,
-shared by `build_items` and the report. On the committed corpus (re-run in the audit):
+shared by `build_items` and the report. On the committed corpus:
 
 | player | deals | turns | items | items with a 1,000+ char CoT | mean CoT chars, turn 0 | mean CoT chars, later turns | median moves per `play` call |
 |---|---|---|---|---|---|---|---|
@@ -319,9 +279,8 @@ that submits its whole solution in one or two `play` calls therefore leaves almo
 score. PR #4 ran `claude-opus-5` on 6 deals (1, 2, 3, 164, 617, 3358). That produced 9 items,
 **only 2 with a CoT over 1,000 characters**: Opus averaged 34,802 CoT characters on turn 0 and
 then played out the plan. On the 5 deals it won, later turns averaged 11-970 characters. On
-#617, which it did not win, later turns averaged 27,600. [confidence: ~85% for this mechanism
-on these players; n = 2 deals per v2 player and 6 for Opus, so these describe this corpus, not
-the population]
+#617, which it did not win, later turns averaged 27,600. With 2 deals per v2 player and 6 for
+Opus, these numbers describe this corpus, not the players in general.
 
 PR #4 lists the possible mitigations and their costs; none is implemented as a default.
 `build_items(min_turn=0)` exists but is not exposed on the CLI.
@@ -347,16 +306,16 @@ total. The arms are matched on deal, not on draw. Truncation at the output cap h
 directed turns and 6/40 offered turns; truncated turns are excluded from items rather than
 scored as illegible. PR #2 also found that 27 of 115 responses carried a `scratchpad` and a
 `play` block together, and that before its fix those moves were silently never applied.
-[confidence: ~75% that the relocation reading holds for `claude-opus-5` at turn 0; untested on
-other models, on later turns, and on legibility]
+The relocation result covers one model at turn 0 only; other models, later turns, and the
+legibility of the pad are untested.
 
-## Scope and limitations
+## Limitations
 
-- **What it does not cover.** One task family (FreeCell), Anthropic models only, two monitors
-  (no Opus-tier monitor), `ack` feedback only, and one sample per item (the API has no seed).
-  The results say nothing yet about how legible the Mythos system-card trace itself is: the
-  player standing in for it contributes 1 of 26 items, through summarized rather than raw
-  thinking.
+- **Narrow scope.** One task family (FreeCell), Anthropic models only, two monitors (no
+  Opus-tier monitor), `ack` feedback only, and one sample per item (the API has no seed).
+- **The motivating trace is barely tested.** The player standing in for the Mythos system-card
+  trace contributes 1 of 26 items, through summarized rather than raw thinking, so the results
+  say nothing yet about how legible that trace is.
 - **Self-monitoring.** `claude-sonnet-5` monitors 7 items that `claude-sonnet-5` played. Nothing
   splits those out, so own-trace familiarity is not ruled out.
 - **Few distinct placebo traces.** The 26 `swapped-cot` items draw on only 5 distinct donor
@@ -367,26 +326,10 @@ other models, on later turns, and on legibility]
 - **Direction versus magnitude.** For "a wrong-game trace misleads Sonnet 5" the uncertainty is
   mostly about *magnitude*. For "the real CoT adds signal beyond the history" and "the real
   CoT hurts state reconstruction", the *direction* itself is uncertain at this n.
-- **The most important missing piece** is a powered native-arm corpus whose items carry
-  substantive mid-game CoT from a frontier player, with intervals on the with-CoT minus
-  no-CoT delta. Ways to get one are hard deals, scoring turn 0, or more deals; see
+- **No powered corpus yet.** The most important missing piece is a native-arm corpus whose
+  items carry substantive mid-game CoT from a frontier player, with intervals on the with-CoT
+  minus no-CoT delta. Ways to get one are hard deals, scoring turn 0, or more deals; see
   [item yield](#item-yield).
-
-## Provenance and research process
-
-The repo was built between 2026-08-11 and 2026-08-15 (12 commits). A first demonstration run
-(v1, 76 monitor runs, commit `7de2347`) was replaced by the v2 run after the `swapped-cot`
-placebo was added (commits `29d7ead`, `3e715ac`). Before v1, review fixed several scoring
-soundness bugs (commit `0c57f7d`). The follow-up PRs were written by agent sessions; their
-write-ups record their own verification (test counts, `ruff`, `ty`) and the exact rollout
-commands. Shortcuts taken along the way:
-
-- The v2 run published rates with no intervals.
-- The Opus-tier monitor arm was skipped for rate-limit reasons.
-- v1 data was overwritten, not kept alongside v2.
-- The scratchpad and yield transcripts stayed under the gitignored `.data/`.
-- The 2026-10 audit's intervals and p-values are a re-analysis of committed per-item scores,
-  not a new run.
 
 ## Repo notes
 
